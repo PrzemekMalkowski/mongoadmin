@@ -1,0 +1,3592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="license" content="GNU General Public License v3.0">
+<meta name="license-url" content="https://www.gnu.org/licenses/gpl-3.0">
+<meta name="author" content="Przemysław Malkowski">
+<meta name="copyright" content="Copyright (C) 2026 Przemysław Malkowski">
+<meta name="description" content="MongoAdmin — lightweight MongoDB admin panel">
+<title>MongoAdmin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={darkMode:'class',theme:{extend:{
+  colors:{mg:{DEFAULT:'#00ed64',dim:'#003d1a',dark:'#00c850'},panel:{DEFAULT:'#161b22',border:'#30363d',inner:'#1c2128',hover:'#21262d'}},
+  fontFamily:{mono:['"JetBrains Mono"','monospace']},
+}}}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍃</text></svg>">
+<style>
+:root{color-scheme:dark;}
+body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;}
+.nav-active{background:#003d1a!important;color:#00ed64!important;}
+.jt-key{color:#58a6ff;}.jt-str{color:#3fb950;}.jt-num{color:#e3b341;}
+.jt-bool{color:#f85149;}.jt-null{color:#6e7681;font-style:italic;}.jt-muted{color:#6e7681;}
+.jt-toggle{cursor:pointer;user-select:none;display:flex;align-items:flex-start;gap:2px;}
+.jt-toggle:hover .jt-key{color:#00ed64;}
+.jt-children{margin-left:18px;border-left:1px solid #21262d;padding-left:10px;}
+.jt-arrow{display:inline-block;width:14px;font-size:10px;color:#6e7681;transition:transform .15s;flex-shrink:0;margin-top:3px;}
+.jt-arrow.open{transform:rotate(90deg);}
+mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
+.mb{font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;display:inline-block;}
+.b-PRIMARY{background:#003d1a;color:#00ed64;}.b-SECONDARY{background:#0c2a5c;color:#58a6ff;}
+.b-ARBITER{background:#3d2e00;color:#d29922;}.b-HIDDEN{background:#21262d;color:#8b949e;}
+.b-DOWN{background:#3d0e0a;color:#f85149;}.b-mongos{background:#1a1a4e;color:#a5b4fc;}
+.b-configsvr{background:#2a1a00;color:#fb923c;}.b-shard{background:#0c2a5c;color:#58a6ff;}
+.b-primary{background:#003d1a;color:#00ed64;}.b-secondary{background:#0c2a5c;color:#58a6ff;}
+.b-ok{background:#003d1a;color:#00ed64;}.b-warn{background:#3d2e00;color:#d29922;}.b-err{background:#3d0e0a;color:#f85149;}
+.op-detail{display:none;}.op-detail.open{display:table-row;}
+.op-fast{background:#003d1a;color:#00ed64;}.op-mid{background:#3d2e00;color:#d29922;}.op-slow{background:#3d0e0a;color:#f85149;}
+.lg-row-open td{background:#111820!important;}
+.lg-row-open .lg-chevron{color:#00ed64!important;}
+.health-track{background:#21262d;border-radius:2px;height:4px;overflow:hidden;}
+.health-fill{height:100%;border-radius:2px;transition:width .5s;}
+.cmd-scroll{max-height:420px;overflow-y:auto;}
+.spinner{border:2px solid #21262d;border-top-color:#00ed64;border-radius:50%;width:20px;height:20px;animation:spin .6s linear infinite;display:inline-block;}
+@keyframes spin{to{transform:rotate(360deg);}}
+::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-track{background:#0d1117;}::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px;}
+.modal-wrap{display:none;}.modal-wrap.open{display:flex;}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden;}
+.card-header{padding:12px 16px;border-bottom:1px solid #21262d;font-weight:700;font-size:.875rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+/* RS Config visual graph */
+.cfg-spine{position:relative;padding:8px 0 24px;}
+.cfg-spine-line{position:absolute;top:50%;left:24px;right:24px;height:2px;background:linear-gradient(90deg,#00ed64,#58a6ff,#e3b341,#f87171,#a78bfa);border-radius:1px;transform:translateY(-50%);opacity:.4;}
+.cfg-nodes-row{display:flex;gap:16px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px;position:relative;}
+.cfg-node-card{background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:16px;min-width:220px;max-width:280px;flex:1;position:relative;transition:border-color .2s;}
+.cfg-node-card:hover{border-color:#58a6ff66;}
+.cfg-node-bottom{height:16px;position:relative;}
+.cfg-node-bottom::after{content:'';position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);width:2px;height:16px;background:#30363d;}
+.dt{border-collapse:collapse;font-size:.8rem;width:100%;}
+.dt th{padding:8px 12px;text-align:left;color:#6e7681;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #30363d;background:#1c2128;position:sticky;top:0;z-index:1;}
+.dt td{padding:9px 12px;border-bottom:1px solid #21262d;}
+.dt tr:last-child td{border-bottom:none;}.dt tbody tr:hover td{background:#1c2128;}
+.mono{font-family:"JetBrains Mono",monospace;}
+.btn-sm{border:1px solid #30363d;color:#8b949e;font-size:.75rem;padding:4px 10px;border-radius:5px;background:transparent;cursor:pointer;transition:all .15s;}
+.btn-sm:hover{border-color:#00ed64;color:#00ed64;}
+.btn-xs{border:1px solid #30363d;color:#6e7681;font-size:.68rem;padding:3px 8px;border-radius:4px;background:transparent;cursor:pointer;transition:all .15s;}
+.btn-xs:hover{color:#8b949e;}
+.btn-active{border-color:#00ed64!important;color:#00ed64!important;}
+.btn-danger{border:1px solid #f85149;color:#f85149;font-size:.75rem;padding:4px 10px;border-radius:5px;background:transparent;cursor:pointer;transition:all .15s;}
+.btn-danger:hover{background:#3d0e0a;}
+.fi{background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-family:"JetBrains Mono",monospace;font-size:.8rem;padding:5px 10px;outline:none;}
+.fi:focus{border-color:#00ed64;}select.fi option{background:#161b22;}
+.db-bar-wrap{background:#21262d;border-radius:3px;height:8px;overflow:hidden;flex:1;}
+.db-bar{height:100%;border-radius:3px;transition:width .6s;}
+/* pct bar inline */
+.pct-bar-wrap{background:#21262d;border-radius:2px;height:6px;overflow:hidden;}
+.pct-bar{height:100%;border-radius:2px;}
+.dt-sm{font-size:.75rem;}.dt-sm th,.dt-sm td{padding:6px 10px;}
+.logo {
+  font-size: 1.2rem; /* Adjust this to make the logo larger or smaller */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.brand-name {
+  font-family: sans-serif;
+  font-weight: bold;
+}
+</style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+<header class="flex items-center gap-4 px-5 h-14 bg-panel border-b border-panel-border shrink-0 z-10">
+  <div class="flex items-center gap-3 mr-2">
+    <img src="/static/img/logo.png" alt="" class="h-8 w-auto" onerror="this.style.display='none'">
+    <div class="logo">🍃</div>
+    <span class="font-bold text-lg tracking-tight">Mongo<span class="text-mg">Admin</span></span>
+  </div>
+  <div class="flex items-center gap-2 flex-1 max-w-xl">
+    <input id="uriInput" type="text" placeholder="mongodb://user:pass@host:27017"
+      class="flex-1 bg-panel-inner border border-panel-border rounded px-3 py-1.5 text-sm font-mono text-gray-200 placeholder-gray-600 outline-none focus:border-mg transition-colors"
+      onpaste="uriInputPaste(event)" oninput="uriInputChanged(this)"/>
+    <input id="uriRaw" type="hidden"/>
+    <button onclick="doConnect()" class="bg-mg text-black text-sm font-bold px-4 py-1.5 rounded hover:bg-mg-dark transition-colors">Connect</button>
+    <button id="disconnectBtn" onclick="doDisconnect()" class="hidden border border-panel-border text-gray-400 text-sm px-3 py-1.5 rounded hover:border-red-600 hover:text-red-400 transition-colors">✕</button>
+  </div>
+  <div id="connStatus" class="text-xs font-bold px-2 py-1 rounded-full bg-yellow-900/40 text-yellow-400 ml-auto">DISCONNECTED</div>
+  <div id="connUri" class="text-xs text-gray-500 font-mono hidden mr-2" title="Connection string (password masked)"></div>
+  <div id="pingMs" class="text-xs text-gray-500 font-mono hidden"></div>
+  <div id="topoTag" class="hidden text-xs font-bold px-2 py-1 rounded-full bg-blue-900/40 text-blue-400"></div>
+</header>
+
+<div class="flex flex-1 overflow-hidden">
+<aside class="w-56 bg-panel border-r border-panel-border flex flex-col overflow-y-auto shrink-0">
+  <div class="p-3 pt-4">
+    <div class="text-xs font-bold text-gray-600 uppercase tracking-widest px-2 mb-2">Replica Set</div>
+    <button onclick="nav('rsStatus')"     id="nav-rsStatus"     class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📡 RS Status</button>
+    <button onclick="nav('members')"      id="nav-members"      class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🗺️ Cluster Diagram</button>
+        <button onclick="nav('rsConfig')"     id="nav-rsConfig"     class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">⚙️ RS Configuration</button>
+  </div>
+  <div class="border-t border-panel-border mx-3"></div>
+  <div class="p-3">
+    <div class="text-xs font-bold text-gray-600 uppercase tracking-widest px-2 mb-2">Cluster</div>
+    <button onclick="nav('shStatus')"     id="nav-shStatus"     class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🗂️ Sharding</button>
+    <button onclick="nav('serverStatus')" id="nav-serverStatus" class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📊 Server Status</button>
+    <button onclick="nav('wiredTiger')"   id="nav-wiredTiger"   class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">⚙️ WiredTiger</button>
+    <button onclick="nav('oplogStats')"   id="nav-oplogStats"   class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🔗 Oplog Stats</button>
+    <button onclick="nav('dbStats')"      id="nav-dbStats"      class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🗄️ Database Stats</button>
+    <button onclick="nav('collStats')"    id="nav-collStats"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📂 Collection Stats</button>
+    <button onclick="nav('indexMgmt')"    id="nav-indexMgmt"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📋 Index Management</button>
+  </div>
+  <div class="border-t border-panel-border mx-3"></div>
+  <div class="p-3">
+    <div class="text-xs font-bold text-gray-600 uppercase tracking-widest px-2 mb-2">Operations</div>
+    <button onclick="nav('currentOp')"    id="nav-currentOp"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">⚡ Current Ops</button>
+    <button onclick="nav('slowQueries')"  id="nav-slowQueries"  class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🐢 Slow Queries</button>
+    <button onclick="nav('logViewer')"    id="nav-logViewer"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📜 Log Viewer</button>
+    <button onclick="nav('usersRoles')"   id="nav-usersRoles"   class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">👥 Users & Roles</button>
+  </div>
+</aside>
+
+<main id="main" class="flex-1 overflow-y-auto p-6 space-y-5">
+  <div class="text-gray-500 text-sm mt-20 text-center">Enter a MongoDB connection URI and click <strong class="text-gray-300">Connect</strong>.</div>
+</main>
+</div>
+
+<!-- EDIT MEMBER MODAL -->
+<div id="shardAuthModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[420px] shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold">
+      <span>🔐 Shard Authentication</span><button onclick="closeShardAuth()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4">
+      <div class="bg-yellow-900/20 border border-yellow-800 rounded p-3">
+        <div class="text-xs text-yellow-400"><span id="shardAuthError"></span></div>
+      </div>
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">Shard</label><input id="shardAuthShardId" class="fi w-full" readonly></div>
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">Username</label><input id="shardAuthUsername" type="text" class="fi w-full" placeholder="username"></div>
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">Password</label><input id="shardAuthPassword" type="password" class="fi w-full" placeholder="password"></div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border">
+      <button onclick="closeShardAuth()" class="btn-sm">Cancel</button>
+      <button onclick="submitShardAuth()" class="bg-mg text-black font-bold text-sm px-4 py-1.5 rounded hover:bg-mg-dark">Authenticate</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT MEMBER MODAL -->
+<div id="editModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[460px] shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold">
+      <span>✏️ Edit Member</span><button onclick="closeEdit()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <form id="editForm" class="p-5 space-y-4">
+      <input type="hidden" id="ef-id" name="member_id"><input type="hidden" id="ef-uri" name="uri">
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">Host</label><input id="ef-host" class="fi w-full" readonly></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs text-gray-500 font-semibold block mb-1">Priority</label><input id="ef-priority" name="priority" type="number" step="0.5" min="0" max="1000" class="fi w-full"></div>
+        <div><label class="text-xs text-gray-500 font-semibold block mb-1">Votes</label><input id="ef-votes" name="votes" type="number" step="1" min="0" max="1" class="fi w-full"></div>
+        <div><label class="text-xs text-gray-500 font-semibold block mb-1">Hidden</label><select id="ef-hidden" name="hidden" class="fi w-full"><option value="false">false</option><option value="true">true</option></select></div>
+        <div><label class="text-xs text-gray-500 font-semibold block mb-1">Delay (s)</label><input id="ef-delay" name="secondaryDelaySecs" type="number" step="1" min="0" class="fi w-full"></div>
+      </div>
+      <div class="bg-panel-inner border border-panel-border rounded p-3 mono text-xs text-gray-400 whitespace-pre" id="ef-cmd"></div>
+    </form>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border">
+      <button onclick="closeEdit()" class="btn-sm">Cancel</button>
+      <button onclick="submitEdit()" class="bg-mg text-black font-bold text-sm px-4 py-1.5 rounded hover:bg-mg-dark">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- WRITE CONCERN MODAL -->
+<div id="wcModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[420px] shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold">
+      <span>✍️ Default Write Concern</span><button onclick="closeWC()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4">
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">w (majority / 1 / 2 …)</label><input id="wc-w" class="fi w-full" placeholder="majority"></div>
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">j (journal)</label><select id="wc-j" class="fi w-full"><option value="">— unset —</option><option value="true">true</option><option value="false">false</option></select></div>
+      <div><label class="text-xs text-gray-500 font-semibold block mb-1">wtimeout (ms)</label><input id="wc-wt" class="fi w-full" placeholder="0" type="number" min="0"></div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border">
+      <button onclick="closeWC()" class="btn-sm">Cancel</button>
+      <button onclick="submitWC()" class="bg-mg text-black font-bold text-sm px-4 py-1.5 rounded hover:bg-mg-dark">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- CREATE / EDIT ROLE MODAL -->
+<div id="createRoleModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[640px] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0">
+      <span id="createRoleTitle">🔐 Create Role</span>
+      <button onclick="closeCreateRoleModal()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4 overflow-y-auto flex-1">
+      <input type="hidden" id="createRoleDb">
+      <input type="hidden" id="createRoleIsEdit">
+      <div>
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Role Name</label>
+        <input id="createRoleName" class="fi w-full" placeholder="my_custom_role">
+      </div>
+
+      <!-- Inherited Roles -->
+      <div>
+        <label class="text-xs text-gray-500 font-semibold block mb-2">Inherited Roles</label>
+        <div class="flex gap-2 mb-2">
+          <select id="inheritRolePicker" class="fi flex-1 text-xs">
+            <option value="">Pick a role to inherit…</option>
+          </select>
+          <button onclick="roleInheritAdd()" class="btn-sm">+ Add</button>
+        </div>
+        <div id="inheritedRolesList" class="flex flex-wrap gap-1 min-h-[28px] bg-panel-inner border border-panel-border rounded p-2">
+          <span class="text-gray-600 text-xs" id="inheritedRolesEmpty">None</span>
+        </div>
+      </div>
+
+      <!-- Privilege Builder -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs text-gray-500 font-semibold">Direct Privileges</label>
+          <button onclick="privAdd()" class="btn-xs">+ Add Privilege</button>
+        </div>
+        <div id="privilegesList" class="space-y-2"></div>
+        <div id="privilegesEmpty" class="text-gray-600 text-xs mt-1">No direct privileges</div>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
+      <button onclick="closeCreateRoleModal()" class="btn-sm">Cancel</button>
+      <button onclick="submitCreateRole()" class="bg-mg text-black font-bold text-sm px-4 py-1.5 rounded hover:bg-mg-dark" id="createRoleSubmitBtn">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- CREATE / EDIT USER MODAL -->
+<div id="createUserModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[520px] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0">
+      <span id="createUserTitle">👤 Create User</span>
+      <button onclick="closeCreateUserModal()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4 overflow-y-auto flex-1">
+      <input type="hidden" id="createUserDb">
+      <input type="hidden" id="createUserIsEdit">
+      <div>
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Username</label>
+        <input id="createUsername" class="fi w-full" placeholder="newuser">
+      </div>
+      <div id="createUserPassRow">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Password</label>
+        <input id="createUserPass" class="fi w-full" type="password" placeholder="••••••••">
+      </div>
+      <!-- Role Assignment -->
+      <div>
+        <label class="text-xs text-gray-500 font-semibold block mb-2">Roles</label>
+        <div class="flex gap-2 mb-2">
+          <select id="userRolePicker" class="fi flex-1 text-xs">
+            <option value="">Pick a role…</option>
+          </select>
+          <button onclick="userRoleAdd()" class="btn-sm">+ Add</button>
+        </div>
+        <div id="userRolesList" class="flex flex-wrap gap-1 min-h-[28px] bg-panel-inner border border-panel-border rounded p-2">
+          <span class="text-gray-600 text-xs" id="userRolesEmpty">No roles assigned</span>
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
+      <button onclick="closeCreateUserModal()" class="btn-sm">Cancel</button>
+      <button onclick="submitCreateUser()" class="bg-mg text-black font-bold text-sm px-4 py-1.5 rounded hover:bg-mg-dark" id="createUserSubmitBtn">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- BATCH KILL MODAL -->
+<div id="batchKillModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[560px] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0">
+      <span>⚡ Batch Kill Operations</span>
+      <button onclick="closeBatchKillModal()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4 overflow-y-auto flex-1">
+      <div class="bg-red-900/20 border border-red-800 rounded p-3 text-xs text-red-300">
+        ⚠️ This will immediately terminate all matching operations. Use carefully in production.
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-gray-500 font-semibold block mb-1">Op Type</label>
+          <select id="bkOp" class="fi w-full text-xs">
+            <option value="">Any op type</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 font-semibold block mb-1">Namespace (db.collection)</label>
+          <select id="bkNs" class="fi w-full text-xs">
+            <option value="">Any namespace</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 font-semibold block mb-1">Application Name</label>
+          <select id="bkApp" class="fi w-full text-xs">
+            <option value="">Any app</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 font-semibold block mb-1">Running at least (seconds)</label>
+          <input id="bkMinSecs" type="number" min="0" value="30" class="fi w-full text-xs">
+        </div>
+      </div>
+      <button onclick="previewBatchKill()" class="btn-sm w-full text-center">🔍 Preview matching operations</button>
+      <div id="bkResult" class="bg-panel-inner border border-panel-border rounded p-3 text-xs space-y-1 min-h-[48px]">
+        <span class="text-gray-600">Click Preview to see which operations will be killed</span>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
+      <button onclick="closeBatchKillModal()" class="btn-sm">Cancel</button>
+      <button onclick="executeBatchKill()" class="btn-danger font-bold px-4 py-1.5 rounded">⚡ Kill Matching Ops</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="fixed bottom-5 right-5 z-50 px-4 py-3 rounded-lg text-sm font-medium shadow-xl opacity-0 transition-all duration-300 pointer-events-none max-w-sm"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════ STATE
+let uri='', topology={type:'replicaset',nodes:[]}, currentPage='';
+let opFilter='active', opTargetURI='', ssTargetURI='', rsCfgTargetURI='', usersRolesURI='';
+let opSortCol='secs_running', opSortDir='desc', opCurrentList=[], opView='list';
+let memberNodes=[];
+let shardCredentials={}; // Map of shardId -> {username, password}
+let shardUriMap={}; // Map of shardId -> original URI for credential testing
+let pendingShardAuth=null; // {shardId, onComplete}
+let _membersGen=0; // Generation counter — incremented on each Cluster Diagram load to cancel stale async updates
+let _lgParsed=[]; // Current log viewer display lines — kept module-level so lgToggle can access them by row index
+let urShowBuiltin = false;  // User mgmt: show built-in roles toggle
+let urSelectedDb  = '';     // User mgmt: persisted db selection
+const rsNodesList   =()=>topology.nodes.filter(n=>n.role==='shard'||n.role==='configsvr');
+const mongosNodesList=()=>topology.nodes.filter(n=>n.role==='mongos');
+const allNodesList  =()=>topology.nodes;
+
+// Debug logging function — logs to browser console for debugging
+// Server-side debugging uses --debug flag
+function debugLog(msg) {
+  console.log('[DEBUG]', msg);
+}
+
+// ═══════════════════════════════════════════════════════════ CONNECTION
+
+// Mask the password in a URI for display, preserving scheme + username
+function maskUriDisplay(uriStr) {
+  if (!uriStr) return uriStr;
+  return uriStr.replace(/(mongodb(?:\+srv)?:\/\/[^:@]+:)([^@]+)(@)/, (_,pre,_pass,at) => pre + '•'.repeat(8) + at);
+}
+
+// Called on paste — store raw value, show masked
+function uriInputPaste(event) {
+  event.preventDefault();
+  const pasted = (event.clipboardData || window.clipboardData).getData('text').trim();
+  document.getElementById('uriRaw').value = pasted;
+  document.getElementById('uriInput').value = maskUriDisplay(pasted);
+}
+
+// Called on manual input — treat as raw URI (user is typing, not pasting)
+function uriInputChanged(el) {
+  // If the field no longer contains bullets, user edited it — treat as new raw value
+  if (!el.value.includes('•')) {
+    document.getElementById('uriRaw').value = el.value;
+  }
+}
+
+async function doConnect() {
+  // Use raw hidden value if available, fall back to visible field
+  const rawField = document.getElementById('uriRaw');
+  const input = (rawField?.value || document.getElementById('uriInput').value).trim();
+  if(!input) return toast('Enter a MongoDB URI','error');
+  setStatus('CONNECTING…','yellow');
+  const res=await api('/api/ping',{uri:input});
+  if(res.error){setStatus('ERROR','red');return toast(res.error,'error');}
+  uri=input; opTargetURI=uri; ssTargetURI=uri; rsCfgTargetURI=''; memberNodes=[];
+  document.getElementById('disconnectBtn').classList.remove('hidden');
+  
+  // Display masked URI and clear input for security
+  const maskedUri=maskPassword(uri);
+  document.getElementById('connUri').textContent=maskedUri;
+  document.getElementById('connUri').classList.remove('hidden');
+  document.getElementById('uriInput').value='';
+  if(rawField) rawField.value='';
+  
+  setStatus('LIVE','green');
+  document.getElementById('pingMs').textContent=res.ms+'ms';
+  document.getElementById('pingMs').classList.remove('hidden');
+  const topo=await api('/api/topology',{uri});
+  topology=topo; topology.nodes=topology.nodes||[];
+  const tag=document.getElementById('topoTag');
+  tag.classList.remove('hidden');
+  if(topo.type==='sharded'){
+    tag.textContent=`SHARDED · ${topology.nodes.filter(n=>n.role==='shard').length} shards`;
+    tag.className='text-xs font-bold px-2 py-1 rounded-full bg-blue-900/40 text-blue-400';
+    const firstRS=rsNodesList()[0]; if(firstRS) rsCfgTargetURI=firstRS.uri;
+  } else {
+    tag.textContent='REPLICA SET';
+    tag.className='text-xs font-bold px-2 py-1 rounded-full bg-green-900/40 text-green-400';
+    rsCfgTargetURI=uri;
+  }
+  refreshMemberNodes();
+  nav('rsStatus');
+}
+
+async function refreshMemberNodes() {
+  const rsList=rsNodesList();
+  const body=new URLSearchParams({uri});
+  rsList.forEach(n=>body.append('rs_uri',n.uri));
+  try{
+    const r=await fetch('/api/rs/members',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    memberNodes=await r.json();
+    if(!Array.isArray(memberNodes)) memberNodes=[];
+  }catch(_){memberNodes=[];}
+}
+
+function doDisconnect(){
+  uri=''; topology={type:'replicaset',nodes:[]}; memberNodes=[]; shardCredentials={};
+  setStatus('DISCONNECTED','yellow');
+  document.getElementById('disconnectBtn').classList.add('hidden');
+  document.getElementById('pingMs').classList.add('hidden');
+  document.getElementById('connUri').classList.add('hidden');
+  document.getElementById('topoTag').classList.add('hidden');
+  setMain('<div class="text-gray-500 text-sm mt-20 text-center">Disconnected.</div>');
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('nav-active'));
+}
+function setStatus(label,color){
+  const el=document.getElementById('connStatus');
+  el.textContent=label;
+  el.className='text-xs font-bold px-2 py-1 rounded-full ml-auto '+
+    ({green:'bg-green-900/40 text-green-400',red:'bg-red-900/40 text-red-400',yellow:'bg-yellow-900/40 text-yellow-400'}[color]);
+}
+
+// ═══════════════════════════════════════════════════════════ NAV
+const pages={rsStatus,rsConfig,members,shStatus,serverStatus,wiredTiger,oplogStats,dbStats,collStats,indexMgmt,currentOp,slowQueries,logViewer,usersRoles};
+async function nav(page){
+  if(!uri) return toast('Connect first','error');
+  currentPage=page;
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('nav-active'));
+  const nb=document.getElementById('nav-'+page); if(nb) nb.classList.add('nav-active');
+  setLoading();
+  try{await pages[page]();}catch(e){setMain(errBox(e.message));}
+}
+function setLoading(){setMain('<div class="flex items-center gap-3 text-gray-500 mt-20 justify-center"><div class="spinner"></div> Loading…</div>');}
+function setMain(h){document.getElementById('main').innerHTML=h;}
+
+// ═══════════════════════════════════════════════════════════ API
+async function api(path,params={}){
+  // Add shard credentials to request if available
+  const body = new URLSearchParams(params);
+  
+  if (Object.keys(shardCredentials).length > 0) {
+    debugLog(`[api] Sending shard credentials: ${JSON.stringify(Object.keys(shardCredentials))}`);
+  }
+  
+  for (const [shardId, creds] of Object.entries(shardCredentials)) {
+    body.append('shard_creds_id[]', shardId);
+    body.append('shard_creds_user[]', creds.username);
+    body.append('shard_creds_pass[]', creds.password);
+  }
+  
+  debugLog(`[api] POST ${path} with params: ${body.toString().substring(0, 100)}`);
+  
+  try {
+    const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    debugLog(`[api] Response status: ${r.status}`);
+    
+    // Check if response has content
+    const text = await r.text();
+    if (!text) {
+      debugLog(`[api] Empty response body from ${path}`);
+      return {error: `Empty response from server (${r.status})`};
+    }
+    
+    let result;
+    try {
+      result = JSON.parse(text);
+    } catch(e) {
+      debugLog(`[api] Failed to parse JSON: ${e.message}, text: ${text.substring(0, 200)}`);
+      return {error: `Invalid JSON response: ${e.message}`};
+    }
+    
+    if (!result) {
+      debugLog(`[api] Parsed JSON is null`);
+      return {error: 'Server returned null response'};
+    }
+    
+    debugLog(`[api] Response: ${JSON.stringify(result).substring(0, 200)}`);
+    
+    // Check for shard auth errors and prompt if needed
+    if (result.error && result.error.includes('Unauthorized') && result.failedShard) {
+      // Store the original URI if provided
+      if (result.failedUri) {
+        shardUriMap[result.failedShard] = result.failedUri;
+        debugLog(`[api] Stored original URI for ${result.failedShard}: ${result.failedUri}`);
+      }
+      
+      return new Promise((resolve) => {
+        openShardAuth(result.failedShard, result.error, async () => {
+          // Retry with new credentials
+          const retryResult = await api(path, params);
+          resolve(retryResult);
+        });
+      });
+    }
+    
+    return result;
+  } catch(e) {
+    debugLog(`[api] Exception: ${e.message}`);
+    return {error: `API call failed: ${e.message}`};
+  }
+}
+async function apiFanOut(path,extraURIs,key='rs_uri'){
+  const body=new URLSearchParams({uri});
+  extraURIs.forEach(u=>body.append(key,u));
+  
+  // Add shard credentials
+  for (const [shardId, creds] of Object.entries(shardCredentials)) {
+    body.append('shard_creds_id[]', shardId);
+    body.append('shard_creds_user[]', creds.username);
+    body.append('shard_creds_pass[]', creds.password);
+  }
+  
+  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+  return r.json();
+}
+
+// ═══════════════════════════════════════════════════════════ INSTANCE SELECTOR
+// Stamp the main connection credentials onto any topology URI.
+// Uses getHostFromUri to extract the host part cleanly, then rebuilds the URI.
+// Preserves ?query parameters from the target URI.
+function injectCredsIntoUri(targetUri) {
+  const creds = extractCredentials(uri); // from global connected URI
+  if (!creds.username || !creds.password) return targetUri;
+
+  const host = getHostFromUri(targetUri);
+  if (!host) return targetUri;
+
+  // Preserve path + query string after the host (e.g. "/?directConnection=true")
+  // getHostFromUri stops at / or ?, so find where the host ends in the original URI
+  const hostIdx = targetUri.indexOf(host);
+  const afterHost = hostIdx >= 0 ? targetUri.substring(hostIdx + host.length) : '';
+  // Ensure there's always a / before any query string
+  const suffix = afterHost.startsWith('?') ? '/' + afterHost : afterHost;
+
+  return `mongodb://${creds.username}:${creds.password}@${host}${suffix}`;
+}
+
+function buildInstanceOptions(currentURI){
+  const opts=[];
+  const namedMongos = mongosNodesList();
+
+  // Only add the seed URI when there are NO named mongos from topology.
+  // When named mongos exist, the seed URI is just a redundant multi-host entry.
+  if(topology.type==='sharded' && namedMongos.length===0){
+    opts.push({uri, label:'mongos (connected)'});
+  }
+
+  // Individual mongod members — inject credentials, skip arbiters (no user accounts)
+  for(const m of memberNodes){
+    if(m.role==='arbiter') continue; // arbiters cannot authenticate data operations
+    const mUri = injectCredsIntoUri(m.uri);
+    const label = `${m.rs}/${m.id.split('/')[1]||m.id} (${m.role})`;
+    opts.push({uri: mUri, label});
+  }
+
+  // Named mongos nodes — inject credentials
+  for(const n of namedMongos){
+    const nUri = injectCredsIntoUri(n.uri);
+    opts.push({uri: nUri, label:`${n.id} (mongos)`});
+  }
+
+  if(topology.type!=='sharded'&&memberNodes.length===0){
+    opts.push({uri, label:'connected RS'});
+  }
+  const seen=new Set();
+  return opts.filter(o=>{if(seen.has(o.uri))return false;seen.add(o.uri);return true;});
+}
+function instanceSelect(currentURI,onchangeFn){
+  const opts=buildInstanceOptions(currentURI);
+  if(opts.length<=1) return '';
+  return `<div class="flex items-center gap-2">
+    <span class="text-xs text-gray-500">Instance:</span>
+    <select onchange="${onchangeFn}(this.value)" class="fi text-xs">
+      ${opts.map(o=>`<option value="${esc(o.uri)}" ${o.uri===currentURI?'selected':''}>${esc(o.label)}</option>`).join('')}
+    </select></div>`;
+}
+
+// Show an error that keeps the page header + instance selector visible
+// so the user can switch to another instance without losing navigation.
+function setMainWithError(icon, title, actions, errorMsg, instanceUri){
+  const host = instanceUri ? getHostFromUri(instanceUri) : '';
+  const detail = host ? ` (${host})` : '';
+  setMain(`<div class="space-y-5">
+    ${pageHeader(icon, title, '', actions)}
+    <div class="card border-red-800">
+      <div class="p-4 space-y-2">
+        <div class="text-red-400 font-semibold text-sm">⚠️ Error${detail}</div>
+        <div class="mono text-xs text-red-300 break-all">${esc(errorMsg)}</div>
+      </div>
+    </div>
+  </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════ RS STATUS
+async function rsStatus(){
+  const rsList=rsNodesList();
+  const results=rsList.length>0
+    ?await apiFanOut('/api/rs/status/all',rsList.map(n=>n.uri))
+    :await apiFanOut('/api/rs/status/all',[]);
+  
+  // Check for auth errors and prompt user
+  if (await handleAuthErrorsInResults(results)) {
+    // User provided auth, retry
+    return rsStatus();
+  }
+  
+  const stateCol=s=>({'PRIMARY':'b-PRIMARY','SECONDARY':'b-SECONDARY','ARBITER':'b-ARBITER'}[s]||'b-DOWN');
+  const uptimeH=s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return `${h}h ${m}m`;};
+  let cards='';
+  for(const rs of results){
+    if(rs.error){
+      const node=topology.nodes.find(n=>n.uri===rs.uri);
+      const rt=node?`<span class="mb b-${node.role} ml-2">${node.role}</span>`:'';
+      cards+=`<div class="card"><div class="card-header">⚠️ ${esc(rs.shardId)} ${rt}</div><div class="p-4 text-red-400 text-sm mono">${esc(rs.error)}</div></div>`;
+      continue;
+    }
+    const d=rs.data||{},mems=d.members||[];
+    const node=topology.nodes.find(n=>n.uri===rs.uri);
+    const rt=node?`<span class="mb b-${node.role} ml-2">${node.role}</span>`:'';
+    cards+=`<div class="card">
+      <div class="card-header">📡 ${esc(d.set||rs.shardId)} ${rt}
+        <span class="mb b-PRIMARY ml-2">${mems.filter(m=>m.stateStr==='PRIMARY').length}P</span>
+        <span class="mb b-SECONDARY ml-1">${mems.filter(m=>m.stateStr==='SECONDARY').length}S</span>
+        <span class="text-gray-600 mono text-xs ml-auto">term ${d.term||'?'} · writeMajority: <span class="text-gray-400">${d.writeMajorityCount??'?'}</span> · votingMembers: <span class="text-gray-400">${d.votingMembersCount??'?'}</span></span>
+      </div>
+      <table class="dt"><thead><tr><th>ID</th><th>Host</th><th>State</th><th>Health</th><th>Uptime</th><th>Sync Source</th><th>Config Ver</th></tr></thead>
+      <tbody>${mems.map(m=>`<tr>
+        <td class="mono">${m._id}</td><td class="mono text-xs">${esc(m.name)}</td>
+        <td><span class="mb ${stateCol(m.stateStr)}">${m.stateStr}</span></td>
+        <td>${m.health===1?'<span class="text-mg">✓</span>':'<span class="text-red-400">✗</span>'}</td>
+        <td class="mono text-xs text-gray-500">${m.uptime!==undefined?uptimeH(m.uptime):'—'}</td>
+        <td class="mono text-xs text-gray-500">${esc(m.syncSourceHost||'—')}</td>
+        <td class="mono text-xs">${m.configVersion||'?'}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  const allMems=results.flatMap(r=>(r.data||{}).members||[]);
+  setMain(`<div class="space-y-5">
+    ${pageHeader('📡','RS Status',topology.type==='sharded'?`Sharded · ${results.length} replica sets`:`rs.status()`,
+      `<button onclick="nav('rsStatus')" class="btn-sm">↻ Refresh</button>`)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('RS Sets',results.length,topology.type,'text-blue-400')}
+      ${statCard('Total Members',allMems.length,allMems.filter(m=>m.health===1).length+' healthy','')}
+      ${statCard('Primaries',allMems.filter(m=>m.stateStr==='PRIMARY').length,'','text-mg')}
+      ${statCard('Secondaries',allMems.filter(m=>m.stateStr==='SECONDARY').length,'','')}
+    </div>
+    ${cards}
+    ${jsonCard('rsStatusRaw',results,1,'replSetGetStatus (all RS)')}
+  </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════ RS CONFIG
+async function rsConfig(targetURI){
+  if(targetURI) rsCfgTargetURI=targetURI;
+  if(!rsCfgTargetURI) rsCfgTargetURI=rsNodesList().length>0?rsNodesList()[0].uri:uri;
+  rsCfgTargetURI = injectCredsIntoUri(rsCfgTargetURI);
+  const d=await api('/api/rs/config',{uri:rsCfgTargetURI});
+  if(d.error) return setMain(errBox(d.error));
+  const rsSel=rsNodesList().length>1?`<div class="flex items-center gap-2"><span class="text-xs text-gray-500">RS:</span>
+    <select onchange="rsConfig(this.value)" class="fi text-xs">
+      ${rsNodesList().map(n=>`<option value="${esc(injectCredsIntoUri(n.uri))}" ${injectCredsIntoUri(n.uri)===rsCfgTargetURI?'selected':''}>${esc(n.id)} (${esc(n.role)})</option>`).join('')}
+    </select></div>`:'';
+
+  // ── Build visual config graph ──────────────────────────────────────────────
+  const members = d.members || [];
+  const settings = d.settings || {};
+
+  // Role badge for member state
+  const stateLabel = m => {
+    if (m.hidden)            return {label:'HIDDEN',   cls:'b-HIDDEN'};
+    if (m.arbiterOnly)       return {label:'ARBITER',  cls:'b-ARBITER'};
+    if (m.priority === 0 && !m.arbiterOnly) return {label:'SECONDARY', cls:'b-SECONDARY'};
+    if (m.priority > 1)      return {label:'PRIORITY', cls:'b-PRIMARY'};
+    return                          {label:'MEMBER',   cls:'b-SECONDARY'};
+  };
+
+  const tagRow = (k, v, warn=false) =>
+    `<div class="grid py-0.5 border-b border-white/5 last:border-0" style="grid-template-columns:max-content 1fr;gap:0 1.5rem">
+      <span class="text-gray-500 text-xs whitespace-nowrap">${esc(k)}</span>
+      <span class="mono text-xs ${warn?'text-yellow-400':'text-gray-200'} text-right">${esc(String(v))}</span>
+    </div>`;
+
+  // Write concern defaults
+  const wc = d.writeConcernMajorityJournalDefault !== undefined
+    ? `<div class="flex items-center gap-2 text-xs mt-1"><span class="text-gray-500">writeConcernMajorityJournalDefault:</span><span class="mono ${d.writeConcernMajorityJournalDefault?'text-mg':'text-yellow-400'}">${d.writeConcernMajorityJournalDefault}</span></div>`
+    : '';
+
+  const settingsRows = [
+    ['heartbeatIntervalMillis', settings.heartbeatIntervalMillis ?? '—'],
+    ['heartbeatTimeoutSecs',    settings.heartbeatTimeoutSecs    ?? '—'],
+    ['electionTimeoutMillis',   settings.electionTimeoutMillis   ?? '—'],
+    ['catchUpTimeoutMillis',    settings.catchUpTimeoutMillis    ?? '—'],
+    ['catchUpTakeoverDelayMillis', settings.catchUpTakeoverDelayMillis ?? '—'],
+    ['chaining allowed',        settings.chainingAllowed ?? '—'],
+  ].map(([k,v]) => tagRow(k,v)).join('');
+
+  const wcSettings = settings.getLastErrorDefaults
+    ? tagRow('getLastErrorDefaults.w', settings.getLastErrorDefaults.w ?? '—') +
+      tagRow('getLastErrorDefaults.wtimeout', settings.getLastErrorDefaults.wtimeout ?? '—')
+    : '';
+
+  // Member cards in a responsive grid
+  const memberCards = members.map(m => {
+    const {label, cls} = stateLabel(m);
+    const delay = m.secondaryDelaySecs || m.slaveDelay || 0;
+    const tags  = Object.entries(m.tags||{});
+    return `<div class="cfg-node-card">
+      <!-- Node header -->
+      <div class="flex items-start justify-between gap-2 mb-3">
+        <div class="flex flex-col gap-1">
+          <span class="mono text-sm font-bold text-gray-100 leading-tight break-all">${esc(m.host)}</span>
+          <div class="flex gap-1 flex-wrap mt-0.5">
+            <span class="mb ${cls}" style="font-size:.6rem">${label}</span>
+            ${m.buildIndexes===false?'<span class="mb b-warn" style="font-size:.6rem">no-index</span>':''}
+            ${delay>0?`<span class="mb b-warn" style="font-size:.6rem">delay ${delay}s</span>`:''}
+          </div>
+        </div>
+        <span class="mono text-xs text-gray-600 shrink-0">#${m._id}</span>
+      </div>
+      <!-- Stats grid -->
+      <div class="space-y-0">
+        ${tagRow('Priority', m.priority, m.priority===0&&!m.arbiterOnly)}
+        ${tagRow('Votes',    m.votes,    m.votes===0)}
+        ${!m.arbiterOnly ? tagRow('Hidden',  m.hidden  ?? false) : ''}
+        ${!m.arbiterOnly && delay>0 ? tagRow('Delay', delay+'s', true) : ''}
+        ${!m.arbiterOnly ? tagRow('BuildIndexes', m.buildIndexes ?? true) : ''}
+      </div>
+      <!-- Tags -->
+      ${tags.length ? `<div class="mt-2 flex flex-wrap gap-1">${tags.map(([k,v])=>`<span class="text-xs px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 mono">${esc(k)}=${esc(v)}</span>`).join('')}</div>` : ''}
+      <!-- Horizon line between node and connector nub -->
+      <div class="cfg-node-bottom"></div>
+    </div>`;
+  }).join('');
+
+  // Votes summary: show who can vote
+  const voters  = members.filter(m=>m.votes>0);
+  const noVotes = members.filter(m=>!m.votes);
+  const voteBar = `<div class="flex items-center gap-3 flex-wrap">
+    ${voters.map(m=>`<div class="flex items-center gap-1.5">
+      <div class="w-2 h-2 rounded-full bg-mg"></div>
+      <span class="mono text-xs text-gray-400">${esc(m.host.split(':')[0])}</span>
+    </div>`).join('')}
+    ${noVotes.length?`<span class="text-xs text-gray-600">· ${noVotes.length} non-voting</span>`:''}
+  </div>`;
+
+  // Priority rank visualization
+  const maxPri  = Math.max(...members.map(m=>m.priority||0), 1);
+  const priBars = members.filter(m=>!m.arbiterOnly).sort((a,b)=>b.priority-a.priority).map(m=>{
+    const pct = maxPri>0 ? Math.round((m.priority||0)/maxPri*100) : 0;
+    const col = m.priority===maxPri?'#00ed64': m.priority>0?'#58a6ff':'#4b5563';
+    return `<div class="flex items-center gap-2">
+      <span class="mono text-xs text-gray-400 w-32 truncate shrink-0">${esc(m.host.split(':')[0])}</span>
+      <div class="flex-1 bg-panel-inner rounded-full h-2">
+        <div style="width:${pct}%;background:${col};height:8px;border-radius:4px"></div>
+      </div>
+      <span class="mono text-xs w-6 text-right ${m.priority===maxPri?'text-mg':'text-gray-500'}">${m.priority}</span>
+    </div>`;
+  }).join('');
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('⚙️','Replica Set Configuration',
+      `<code class="text-mg text-xs">${esc(d._id||'')}</code> · v${d.version||'?'} · ${members.length} members`,
+      `${rsSel}<button onclick="nav('rsConfig')" class="btn-sm">↻</button>`)}
+
+    <!-- RS identity bar -->
+    <div class="card">
+      <div class="p-4 flex flex-wrap gap-6 text-xs">
+        <div><span class="text-gray-500">Set Name</span><div class="mono text-mg font-bold text-base mt-0.5">${esc(d._id||'?')}</div></div>
+        <div><span class="text-gray-500">Config Version</span><div class="mono text-gray-200 font-bold text-base mt-0.5">${d.version||'?'}</div></div>
+        <div><span class="text-gray-500">Term</span><div class="mono text-gray-200 font-bold text-base mt-0.5">${d.term??'—'}</div></div>
+        <div><span class="text-gray-500">Protocol</span><div class="mono text-gray-200 font-bold text-base mt-0.5">v${d.protocolVersion||1}</div></div>
+        <div><span class="text-gray-500">Journal Majority</span><div class="mono font-bold text-base mt-0.5 ${d.writeConcernMajorityJournalDefault?'text-mg':'text-yellow-400'}">${d.writeConcernMajorityJournalDefault??'—'}</div></div>
+      </div>
+    </div>
+
+    <!-- Member graph -->
+    <div class="card">
+      <div class="card-header">🖧 Members
+        <span class="text-gray-600 font-normal text-xs ml-1">${members.length} nodes · ${voters.length} voters</span>
+      </div>
+      <div class="p-4">
+        <!-- RS spine line -->
+        <div class="cfg-spine">
+          <div class="cfg-spine-line"></div>
+          <div class="cfg-nodes-row">${memberCards}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Priority + Votes side by side -->
+    <div class="grid grid-cols-2 gap-5">
+      <div class="card">
+        <div class="card-header">🏆 Election Priority</div>
+        <div class="p-4 space-y-2">${priBars||'<span class="text-gray-600 text-xs">No data</span>'}</div>
+      </div>
+      <div class="card">
+        <div class="card-header">🗳 Votes</div>
+        <div class="p-4">${voteBar}</div>
+      </div>
+    </div>
+
+    <!-- Settings panel -->
+    <div class="card">
+      <div class="card-header">⚙️ Settings</div>
+      <div class="p-4 grid grid-cols-2 gap-5">
+        <div>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Timings</div>
+          ${settingsRows}
+        </div>
+        <div>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Write Concern</div>
+          ${wcSettings}${wc}
+        </div>
+      </div>
+    </div>
+
+    <!-- Raw JSON -->
+    ${jsonCard('rsCfgRaw',d,2,'db.adminCommand({replSetGetConfig:1})')}
+  </div>`)
+}
+
+// ═══════════════════════════════════════════════════════════ CLUSTER DIAGRAM
+
+// Builds the rendered mongos section HTML from already-fetched detail data.
+function buildMongosHtml(mongoses, mongosDetailsMap) {
+  return `<div id="mongos-section" class="border border-indigo-900/40 rounded-xl p-5 bg-indigo-950/10 space-y-4">
+    <div class="flex items-center gap-3"><span class="mb b-mongos">mongos</span><span class="text-gray-400 text-sm">${mongoses.length} router${mongoses.length!==1?'s':''}</span></div>
+    <div class="flex flex-wrap gap-4">${mongoses.map(n=>{
+      const detail=mongosDetailsMap[n.uri]||{};
+      const nUri=injectCredsIntoUri(n.uri);
+      return `<div class="border border-indigo-900/50 rounded-lg p-4 bg-indigo-950/20 min-w-[280px] flex-1 max-w-sm">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <div class="mono text-sm font-semibold text-gray-200">${esc(n.id)}</div>
+            <div class="mono text-xs text-gray-500 mt-0.5">${esc(getHostFromUri(n.uri))}</div>
+            <span class="mb b-mongos mt-1 inline-block">mongos</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-y-1.5 text-xs mb-3">
+          ${detail.version?`<div class="text-gray-500">Version</div><div class="mono text-gray-400">v${esc(detail.version)}</div>`:''}
+          <div class="text-gray-500">Local Threshold</div><div class="mono text-blue-400">${detail.localThreshold||15}ms</div>
+          <div class="text-gray-500">Max Connections</div><div class="mono text-blue-400">${detail.maxConns||65536}</div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="ssTargetURI='${esc(nUri)}';nav('serverStatus')" class="btn-sm text-xs">📊 Status</button>
+          <button onclick="opTargetURI='${esc(nUri)}';nav('currentOp')" class="btn-sm text-xs">⚡ Ops</button>
+        </div>
+      </div>`;
+    }).join('')}</div>
+  </div>`;
+}
+
+// Loads one RS section asynchronously and patches it into the DOM as data arrives.
+// gen is compared against _membersGen before any DOM write — stale updates from a
+// previous load (e.g. user hit Refresh mid-flight) are silently discarded.
+async function loadRsSection(node, idx, creds, gen) {
+  const stateOf =(m,sm)=>sm[m.host]?.stateStr||(m.arbiterOnly?'ARBITER':'UNKNOWN');
+  const badgeOf =s=>({'PRIMARY':'b-PRIMARY','SECONDARY':'b-SECONDARY','ARBITER':'b-ARBITER'}[s]||'b-DOWN');
+  const uptimeH =s=>s?`${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`:'—';
+  const borderOf=s=>s==='PRIMARY'?'border-mg border':'border-panel-border border';
+  // Always re-query the element — it may have been replaced by a prior outerHTML write.
+  const getEl=()=>gen===_membersGen?document.getElementById(`rs-section-${idx}`):null;
+
+  try {
+    const [cfg, statusRes] = await Promise.all([
+      api('/api/rs/config', {uri:node.uri}),
+      apiFanOut('/api/rs/status/all', [node.uri])
+    ]);
+
+    if (gen !== _membersGen) return; // page changed while we were fetching
+
+    if (cfg.error) {
+      const el=getEl();
+      if (el) el.outerHTML=`<div id="rs-section-${idx}" class="card p-4">
+        <div class="text-red-400 text-sm mono">⚠️ Config error for <strong>${esc(node.id)}</strong>: ${esc(cfg.error)}</div>
+      </div>`;
+      return;
+    }
+
+    const status=(statusRes[0]||{}).data||{};
+    const sm={};(status.members||[]).forEach(m=>{sm[m.name]=m;});
+    const mems=[...(cfg.members||[])].sort((a,b)=>(b.priority||0)-(a.priority||0)||a._id-b._id);
+    const rsName=status.set||cfg._id||node.id;
+
+    // Render member cards immediately — version field shows a tiny spinner until the
+    // individual directConnection fetch completes (or times out).
+    const memberCardsHtml=mems.map((m,mIdx)=>{
+      const st=sm[m.host]||{}, state=stateOf(m,sm);
+      const isArbiter=m.arbiterOnly||state==='ARBITER';
+      const directURI=buildUriWithCredentials(m.host, creds, {directConnection:'true'});
+      const actionBtns=isArbiter
+        ?`<div class="text-xs text-gray-600 mt-1 italic">Arbiter — no data operations</div>`
+        :`<div class="flex gap-2 mt-1">
+            <button onclick="ssTargetURI='${esc(directURI)}';nav('serverStatus')" class="btn-sm text-xs flex-1">📊 Status</button>
+            <button onclick="opTargetURI='${esc(directURI)}';nav('currentOp')" class="btn-sm text-xs flex-1">⚡ Ops</button>
+          </div>`;
+      return `<div id="mc-${idx}-${mIdx}" class="shard-box ${borderOf(state)} p-4 flex-1 min-w-[200px] max-w-xs" style="border-radius:10px;background:#161b22;">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <span class="mono text-xs font-semibold text-gray-200 break-all leading-tight">${esc(m.host)}</span>
+          <span class="mb ${badgeOf(state)}">${state}</span>
+        </div>
+        <div class="grid grid-cols-2 gap-y-1.5 text-xs mb-3">
+          ${!isArbiter
+            ?`<div class="text-gray-500">Version</div><div id="ver-${idx}-${mIdx}" class="mono text-gray-400" style="display:flex;align-items:center;gap:4px"><span class="spinner" style="width:11px;height:11px;border-width:1.5px;flex-shrink:0"></span></div>`
+            :''}
+          <div class="text-gray-500">Priority</div><div class="mono ${m.priority>0?'text-mg':'text-yellow-400'}">${m.priority}</div>
+          <div class="text-gray-500">Votes</div><div class="mono">${m.votes}</div>
+          ${!isArbiter?`<div class="text-gray-500">Hidden</div><div class="mono ${m.hidden?'text-yellow-400':''}">${m.hidden}</div>`:''}
+          ${!isArbiter?`<div class="text-gray-500">Delay</div><div class="mono ${(m.secondaryDelaySecs||0)>0?'text-yellow-400':''}">${m.secondaryDelaySecs||0}s</div>`:''}
+          <div class="text-gray-500">Uptime</div><div class="mono text-gray-400">${uptimeH(st.uptime)}</div>
+          <div class="text-gray-500">Health</div><div>${st.health===1?'<span class="text-mg">✓</span>':'<span class="text-red-400">✗</span>'}</div>
+        </div>
+        ${Object.keys(m.tags||{}).length?`<div class="flex flex-wrap gap-1 mb-3">${Object.entries(m.tags).map(([k,v])=>`<span class="text-xs px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 mono">${esc(k)}=${esc(v)}</span>`).join('')}</div>`:''}
+        ${!isArbiter?`<button onclick='openEdit(${JSON.stringify({id:m._id,host:m.host,priority:m.priority,hidden:m.hidden,votes:m.votes,delay:m.secondaryDelaySecs||0,rsUri:node.uri})})' class="btn-sm w-full text-center mt-1">✏️ Edit</button>`:''}
+        ${actionBtns}
+      </div>`;
+    }).join('');
+
+    const sectionHtml=`<div id="rs-section-${idx}" class="border border-panel-border rounded-xl p-5 bg-panel-inner space-y-4">
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="mb b-${node.role}">${node.role}</span>
+        <span class="mono text-mg font-semibold text-sm">${esc(rsName)}</span>
+        <span class="mb b-PRIMARY">${mems.filter(m=>stateOf(m,sm)==='PRIMARY').length}× Primary</span>
+        <span class="mb b-SECONDARY">${mems.filter(m=>stateOf(m,sm)==='SECONDARY').length}× Secondary</span>
+        ${mems.filter(m=>m.arbiterOnly).length?`<span class="mb b-ARBITER">${mems.filter(m=>m.arbiterOnly).length}× Arbiter</span>`:''}
+        ${mems.filter(m=>m.hidden).length?`<span class="mb b-HIDDEN">${mems.filter(m=>m.hidden).length}× Hidden</span>`:''}
+        <span class="text-xs text-gray-600 mono ml-auto">${esc(getHostFromUri(node.uri))}</span>
+      </div>
+      <div class="flex flex-wrap gap-4">${memberCardsHtml}</div>
+    </div>`;
+
+    const el=getEl();
+    if (el) el.outerHTML=sectionHtml;
+
+    // Fire per-member version fetches independently — each updates only its own cell.
+    // If the node is down, the spinner stays until the Go driver times out (5 s), then ✗ appears.
+    mems.forEach((m,mIdx)=>{
+      if (m.arbiterOnly || stateOf(m,sm)==='ARBITER') return;
+      const directURI=buildUriWithCredentials(m.host, creds, {directConnection:'true'});
+      api('/api/server/status',{uri:directURI}).then(ss=>{
+        if (gen!==_membersGen) return;
+        const verEl=document.getElementById(`ver-${idx}-${mIdx}`);
+        if (!verEl) return;
+        if (ss.error) {
+          verEl.innerHTML='<span class="text-red-400">✗ unreachable</span>';
+        } else {
+          verEl.style.display='';
+          verEl.textContent=`v${ss.version||'?'}`;
+        }
+      }).catch(()=>{
+        if (gen!==_membersGen) return;
+        const verEl=document.getElementById(`ver-${idx}-${mIdx}`);
+        if (verEl) verEl.innerHTML='<span class="text-red-400">✗ unreachable</span>';
+      });
+    });
+
+  } catch(e) {
+    const el=getEl();
+    if (el) el.outerHTML=`<div id="rs-section-${idx}" class="card p-4">
+      <div class="text-red-400 text-sm mono">⚠️ Failed to load <strong>${esc(node.id)}</strong>: ${esc(e.message)}</div>
+    </div>`;
+  }
+}
+
+// Cluster Diagram — renders a skeleton immediately, then populates each RS section
+// and mongos section as data arrives. Down nodes show a spinning "Connecting…" card
+// until their driver timeout fires, then flip to an error state — all without
+// blocking the sections that are already reachable.
+async function members(){
+  const rsList=rsNodesList().length>0?rsNodesList():[{id:'primary',role:'shard',uri}];
+  const mongoses=mongosNodesList();
+  const creds=extractCredentials(uri);
+  const gen=++_membersGen; // bump generation — cancels any in-flight updates from a previous load
+
+  // ── Step 1: paint skeleton immediately ──────────────────────────────────────
+  const mongosPlaceholder=mongoses.length
+    ?`<div id="mongos-section">
+        <div class="border border-indigo-900/40 rounded-xl p-4 bg-indigo-950/10 flex items-center gap-3">
+          <span class="mb b-mongos">mongos</span>
+          <div class="spinner" style="width:14px;height:14px;border-width:1.5px;flex-shrink:0"></div>
+          <span class="text-xs text-gray-500">Connecting to ${mongoses.length} router${mongoses.length!==1?'s':''}…</span>
+        </div>
+      </div>`
+    :'';
+
+  const rsSkeleton=rsList.map((node,idx)=>`<div id="rs-section-${idx}">
+    <div class="border border-panel-border rounded-xl p-4 bg-panel-inner flex items-center gap-3">
+      <span class="mb b-${esc(node.role)}">${esc(node.role)}</span>
+      <span class="mono text-sm text-gray-400">${esc(node.id)}</span>
+      <div class="spinner" style="width:14px;height:14px;border-width:1.5px;flex-shrink:0"></div>
+      <span class="text-xs text-gray-500">Connecting…</span>
+    </div>
+  </div>`).join('');
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('🗺️','Cluster Diagram',
+      `${rsList.length} replica set${rsList.length!==1?'s':''}${mongoses.length?' · '+mongoses.length+' mongos':''}`,
+      `<button onclick="nav('members')" class="btn-sm">↻ Refresh</button>`)}
+    ${mongosPlaceholder}
+    ${rsSkeleton}
+  </div>`);
+
+  // ── Step 2: load mongos section asynchronously ───────────────────────────────
+  if (mongoses.length>0) {
+    (async ()=>{
+      const mongosDetailsMap={};
+      await Promise.all(mongoses.map(async n=>{
+        try{
+          const [ss,params,maxParams]=await Promise.all([
+            api('/api/server/status',{uri:n.uri}),
+            api('/api/server/getparam',{uri:n.uri,param:'localThreshold'}),
+            api('/api/server/getparam',{uri:n.uri,param:'maxConns'}),
+          ]);
+          mongosDetailsMap[n.uri]={version:ss.version||'',localThreshold:params.localThreshold||15,maxConns:maxParams.maxConns||65536};
+        }catch(_){}
+      }));
+      if (gen!==_membersGen) return;
+      const el=document.getElementById('mongos-section');
+      if (el) el.outerHTML=buildMongosHtml(mongoses,mongosDetailsMap);
+    })();
+  }
+
+  // ── Step 3: load each RS section independently ───────────────────────────────
+  // Not awaited — each RS races to update its own DOM slot as soon as it's ready.
+  rsList.forEach((node,idx)=>{ loadRsSection(node,idx,creds,gen); });
+}
+
+// ═══════════════════════════════════════════════════════════ SHARDING STATUS
+async function shStatus(){
+  const d=await api('/api/sh/status',{uri});
+  if(d.notSharded) return setMain(`<div class="text-yellow-400 bg-yellow-900/20 border border-yellow-800 rounded p-4 text-sm">
+    Not connected to a mongos — sharding requires a mongos router.<br>
+    <span class="text-gray-500 mt-1 block mono text-xs">${esc(d.error||'')}</span></div>`);
+  const nodes=d.nodes||[],shards=nodes.filter(n=>n.role==='shard');
+  const bal=d.balancer||{},balOn=bal.mode==='full';
+  const dbs=(d.dbs&&d.dbs.databases)||[];
+  const rwc=d.rwconcern||{},dwc=rwc.defaultWriteConcern||{};
+  const balRounds=d.balRounds||[];
+  const migResults=d.migResults||[];
+  const failedRounds=d.failedRounds||0;
+
+  // Balancer rounds table
+  const roundRows=balRounds.map(br=>`<tr>
+    <td class="mono text-xs text-gray-500">${esc(br.time||'')}</td>
+    <td>${br.error?'<span class="text-red-400">✗ Error</span>':'<span class="text-mg">✓ OK</span>'}</td>
+    <td class="mono text-xs">${br.details?Object.entries(br.details).filter(([k])=>k!=='errorOccured').map(([k,v])=>`${k}: ${v}`).join(' · '):'—'}</td>
+  </tr>`).join('');
+
+  const migRows=migResults.map(m=>`<tr>
+    <td class="mono">${esc(m.note)}</td>
+    <td class="mono font-bold ${m.note.toLowerCase().includes('success')?'text-mg':'text-yellow-400'}">${m.count||'—'}</td>
+  </tr>`).join('');
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('🗂️','Sharding Status',`sh.status() · ${shards.length} shards`,
+      `<button onclick="nav('shStatus')" class="btn-sm">↻ Refresh</button>`)}
+    <div class="grid grid-cols-3 gap-3">
+      ${statCard('Shards',shards.length,'','text-blue-400')}
+      ${statCard('Balancer',balOn?'ON':'OFF',bal.inBalancerRound?'Running':'Idle',balOn?'text-mg':'text-yellow-400')}
+      ${statCard('Databases',dbs.length,'','')}
+    </div>
+
+    <!-- Balancer control + stats -->
+    <div class="card">
+      <div class="card-header">⚖️ Balancer</div>
+      <div class="p-4 space-y-4">
+        <div class="flex flex-wrap gap-4 items-center pb-3 border-b border-panel-border">
+          <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+            <div class="text-gray-500">Currently enabled</div><div class="font-bold ${balOn?'text-mg':'text-yellow-400'}">${balOn?'yes':'no'}</div>
+            <div class="text-gray-500">Currently running</div><div class="font-bold ${bal.inBalancerRound?'text-yellow-400':'text-gray-300'}">${bal.inBalancerRound?'yes':'no'}</div>
+            <div class="text-gray-500">Failed rounds (last 5)</div>
+            <div class="font-bold ${failedRounds>0?'text-red-400':'text-mg'}">${failedRounds}</div>
+          </div>
+          <button onclick="toggleBalancer(${!balOn})" class="${balOn?'btn-danger':'btn-sm'} ml-auto">
+            ${balOn?'⏹ Stop Balancer':'▶ Start Balancer'}</button>
+        </div>
+
+        <!-- Migration results last 24h -->
+        <div>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Migration Results — Last 24 Hours</div>
+          ${migResults.length?`<table class="dt"><thead><tr><th>Result</th><th>Count</th></tr></thead><tbody>${migRows}</tbody></table>`:
+            '<div class="text-gray-600 text-sm">No migration data</div>'}
+        </div>
+
+        <!-- Last 5 balancer rounds -->
+        ${balRounds.length?`<div>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Last 5 Balancer Rounds</div>
+          <table class="dt"><thead><tr><th>Time</th><th>Status</th><th>Details</th></tr></thead>
+          <tbody>${roundRows}</tbody></table>
+        </div>`:''}
+      </div>
+    </div>
+
+    <!-- Write concern -->
+    <div class="card">
+      <div class="card-header">✍️ Default Write Concern</div>
+      <div class="p-4 flex flex-wrap gap-6 items-center">
+        <div class="text-sm space-y-1">
+          <div>w: <code class="text-mg mono">${esc(String(dwc.w||'—'))}</code></div>
+          <div>j: <code class="mono">${dwc.j!==undefined?String(dwc.j):'—'}</code></div>
+          <div>wtimeout: <code class="mono">${dwc.wtimeout!==undefined?dwc.wtimeout:'—'}</code></div>
+        </div>
+        <button onclick="openWC()" class="btn-sm">✏️ Edit</button>
+      </div>
+    </div>
+
+    <!-- Shards list -->
+    <div class="card">
+      <div class="card-header">🔀 Shards</div>
+      <table class="dt"><thead><tr><th>ID</th><th>Role</th><th>Host</th></tr></thead>
+      <tbody>${nodes.map(n=>`<tr>
+        <td class="mono font-semibold text-mg">${esc(n.id)}</td>
+        <td><span class="mb b-${n.role}">${n.role}</span></td>
+        <td class="mono text-xs text-gray-400 break-all">${esc(getHostFromUri(n.uri))}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>
+    ${jsonCard('shRaw',d,1,'sh.status() — balancerStatus + listShards + config.changelog')}
+  </div>`);
+}
+async function toggleBalancer(enable){
+  const r=await api('/api/sh/balancer',{uri,enable});
+  if(r.error) return toast(r.error,'error');
+  toast(enable?'Balancer started':'Balancer stopped','success');
+  setTimeout(()=>nav('shStatus'),800);
+}
+function openWC(){document.getElementById('wcModal').classList.add('open');}
+function closeWC(){document.getElementById('wcModal').classList.remove('open');}
+async function submitWC(){
+  const w=document.getElementById('wc-w').value.trim(),j=document.getElementById('wc-j').value,wt=document.getElementById('wc-wt').value;
+  const r=await api('/api/sh/write-concern',{uri,w,j,wtimeout:wt});
+  closeWC(); if(r.error) return toast(r.error,'error');
+  toast('Write concern updated','success'); setTimeout(()=>nav('shStatus'),600);
+}
+
+// ═══════════════════════════════════════════════════════════ SERVER STATUS
+async function serverStatus(targetURI){
+  if(targetURI) ssTargetURI=targetURI;
+  if(!ssTargetURI) ssTargetURI=uri;
+  const sel=instanceSelect(ssTargetURI,'serverStatus');
+  const headerActions=`<div class="flex gap-2 flex-wrap">${sel}<button onclick="serverStatus()" class="btn-sm">↻</button></div>`;
+  // Fetch serverStatus + hostInfo + top commands in parallel
+  const [d,hi,cmds,fcParam]=await Promise.all([
+    api('/api/server/status',{uri:ssTargetURI}),
+    api('/api/server/hostinfo',{uri:ssTargetURI}).catch(()=>({})),
+    api('/api/server/top-commands',{uri:ssTargetURI}),
+    api('/api/server/getparam',{uri:ssTargetURI,param:'flowControlTargetLagSeconds'}).catch(()=>null),
+  ]);
+  if(d.error) return setMainWithError('📊','Server Status',headerActions,d.error,ssTargetURI);
+  const fcTargetLagSecs = fcParam&&!fcParam.error ? (fcParam.flowControlTargetLagSeconds??10) : 10;
+  const conn=d.connections||{},mem=d.mem||{},net=d.network||{},docs=(d.metrics||{}).document||{},gl=d.globalLock||{},fc=d.flowControl||{};
+  const isMongos=(d.process||'')==='mongos';
+  const fmtB=b=>b>1e9?(b/1e9).toFixed(2)+' GB':b>1e6?(b/1e6).toFixed(1)+' MB':Math.round(b/1024)+' KB';
+  const fmtMB=mb=>mb>=1024?(mb/1024).toFixed(1)+' GB':mb+' MB';
+  const fmt=n=>typeof n==='number'?n.toLocaleString():(n||'?');
+  const maxT=Array.isArray(cmds)&&cmds.length?cmds[0].Total:1;
+
+  // ── Host Info section ──────────────────────────────────────────────────────
+  const hiOk = hi && !hi.error;
+  const mongodRamMB = Number(mem.resident||0);
+  const virtMB      = Number(mem.virtual||0);
+
+  // ── Network compression section ────────────────────────────────────────────
+  // serverStatus().network.compression — available on MongoDB 4.2+
+  const netCompr  = (net.compression) || {};
+  const compressors = Object.entries(netCompr);  // [["snappy",{...}], ["zlib",{...}], ...]
+  const totalConns  = compressors.reduce((s,[,v])=>s+Number(v?.compressor?.bytesIn||0)+Number(v?.compressor?.bytesOut||0), 0);
+
+  const netComprSection = compressors.length > 0 ? (() => {
+    // Sum across all compressors to compute "uncompressed" (none) share
+    const byCompressor = compressors.map(([name, cv]) => {
+      const ci = cv?.compressor || {};
+      const di = cv?.decompressor || {};
+      return {
+        name,
+        cIn:  Number(ci.bytesIn  || 0),  // bytes received then compressed
+        cOut: Number(ci.bytesOut || 0),  // compressed bytes sent out
+        dIn:  Number(di.bytesIn  || 0),  // compressed bytes received
+        dOut: Number(di.bytesOut || 0),  // bytes after decompression
+      };
+    });
+
+    // Total bytes across all compressors (for bar width)
+    const grandIn  = byCompressor.reduce((s,c)=>s+c.cIn +c.dIn, 0)  || 1;
+    const grandOut = byCompressor.reduce((s,c)=>s+c.cOut+c.dOut, 0) || 1;
+
+    const colors = {snappy:'#00ed64', zstd:'#58a6ff', zlib:'#e3b341', none:'#4b5563', disabled:'#374151'};
+    const getCol = name => colors[name.toLowerCase()] || '#a78bfa';
+
+    const rows = byCompressor.map(c => {
+      const col       = getCol(c.name);
+      const inPct     = Math.round((c.cIn  + c.dIn)  / grandIn  * 100);
+      const outPct    = Math.round((c.cOut + c.dOut) / grandOut * 100);
+      const totalIn   = c.cIn  + c.dIn;
+      const totalOut  = c.cOut + c.dOut;
+      const used      = totalIn > 0 || totalOut > 0;
+      return `<tr>
+        <td>
+          <div class="flex items-center gap-2">
+            <div class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${col}"></div>
+            <span class="mono font-semibold text-sm ${used?'text-gray-200':'text-gray-600'}">${esc(c.name)}</span>
+            ${!used?'<span class="text-xs text-gray-700 ml-1">unused</span>':''}
+          </div>
+        </td>
+        <td>
+          ${totalIn>0?`<div class="flex items-center gap-2">
+            <div class="flex-1 bg-panel-inner rounded-full h-2">
+              <div style="width:${inPct}%;background:${col};height:8px;border-radius:4px;opacity:.85"></div>
+            </div>
+            <span class="mono text-xs text-gray-300 w-16 text-right shrink-0">${fmtB(totalIn)}</span>
+            <span class="text-gray-600 text-xs w-10 text-right shrink-0">${inPct}%</span>
+          </div>`:'<span class="text-gray-700 text-xs">—</span>'}
+        </td>
+        <td>
+          ${totalOut>0?`<div class="flex items-center gap-2">
+            <div class="flex-1 bg-panel-inner rounded-full h-2">
+              <div style="width:${outPct}%;background:${col};height:8px;border-radius:4px;opacity:.85"></div>
+            </div>
+            <span class="mono text-xs text-gray-300 w-16 text-right shrink-0">${fmtB(totalOut)}</span>
+            <span class="text-gray-600 text-xs w-10 text-right shrink-0">${outPct}%</span>
+          </div>`:'<span class="text-gray-700 text-xs">—</span>'}
+        </td>
+        <td>
+          ${c.cIn>0&&c.cOut>0 ? (() => {
+            const ratio = (c.cIn/c.cOut).toFixed(2);
+            return `<span class="mono text-xs ${c.cIn>c.cOut?'text-mg':'text-gray-400'}">${ratio}×</span>`;
+          })() : '<span class="text-gray-700 text-xs">—</span>'}
+        </td>
+      </tr>`;
+    }).join('');
+
+    return `<div class="card">
+      <div class="card-header">🔌 Network Wire Compression</div>
+      <div class="p-4 space-y-3">
+        <div class="overflow-x-auto"><table class="dt">
+          <thead><tr>
+            <th>Compressor</th>
+            <th>Received (in)</th>
+            <th>Sent (out)</th>
+            <th>Ratio in/out</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+        <div class="text-xs text-gray-600">
+          Bytes shown are cumulative since mongod start ·
+          Ratio &gt;1× means received more than sent (inbound heavier than outbound)
+        </div>
+      </div>
+    </div>`;
+  })() : '';
+
+  // ── Host Info section ──────────────────────────────────────────────────────
+  const hostInfoSection = hiOk ? `<div class="card">
+    <div class="card-header">🖥 Host Info</div>
+    <div class="p-4 grid grid-cols-2 gap-6">
+      <!-- Left: CPU / OS details -->
+      <div>
+        <div class="grid gap-x-6 gap-y-1 text-xs" style="grid-template-columns:max-content 1fr">
+          ${hi.cpuString?`<span class="text-gray-500 whitespace-nowrap">CPU</span>
+            <span class="mono text-gray-200 truncate" title="${esc(hi.cpuString)}">${esc(hi.cpuString)}</span>`:''}
+          <span class="text-gray-500 whitespace-nowrap">Cores</span>
+          <span class="mono text-gray-200">${hi.numCores||'?'} · ${hi.cpuArch||'?'} ${hi.cpuAddrSize||'?'}-bit</span>
+          <span class="text-gray-500 whitespace-nowrap">NUMA</span>
+          <span class="mono ${hi.numaEnabled?'text-yellow-400':'text-gray-200'}">${hi.numaEnabled?'enabled':'disabled'}</span>
+          <span class="text-gray-500 whitespace-nowrap">OS</span>
+          <span class="mono text-gray-200">${esc([hi.osName||hi.osType, hi.osVersion].filter(Boolean).join(' · '))}</span>
+          ${hi.maxOpenFiles?`<span class="text-gray-500 whitespace-nowrap">Max Open Files</span>
+            <span class="mono text-gray-200">${Number(hi.maxOpenFiles).toLocaleString()}</span>`:''}
+        </div>
+      </div>
+      <!-- Right: mongod memory -->
+      <div>
+        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">mongod Memory</div>
+        <div class="grid gap-x-6 gap-y-2 text-xs" style="grid-template-columns:max-content 1fr">
+          <span class="text-gray-500 whitespace-nowrap">Resident (RSS)</span>
+          <span class="mono text-gray-200 font-semibold">${fmtMB(mongodRamMB)}</span>
+          <span class="text-gray-500 whitespace-nowrap">Virtual</span>
+          <span class="mono text-gray-400">${fmtMB(virtMB)}</span>
+          ${hi.memSizeMB?`<span class="text-gray-500 whitespace-nowrap">Host RAM (total)</span>
+            <span class="mono text-gray-400">${fmtMB(Number(hi.memSizeMB))}</span>`:''}
+        </div>
+      </div>
+    </div>
+  </div>` : '';
+
+  // FC section: only on mongod
+  let fcSection='';
+  if(!isMongos){
+    const fcEnabled=fc.enabled!==false;
+    fcSection=`<div class="card">
+      <div class="card-header">🚦 Flow Control
+        <span class="mb ${fcEnabled?'b-PRIMARY':'b-HIDDEN'} ml-2">${fcEnabled?'ENABLED':'DISABLED'}</span>
+        ${fc.isLagged?'<span class="mb b-DOWN ml-1">LAGGED</span>':''}
+        <span class="text-gray-500 text-xs font-normal ml-1 mono">${esc(getHostFromUri(ssTargetURI))}</span>
+      </div>
+      <div class="p-4 space-y-4">
+        <div class="grid grid-cols-6 gap-3 text-xs">
+          <div class="bg-panel-inner rounded p-3"><div class="text-gray-500 mb-1">enabled</div><div class="mono font-bold ${fcEnabled?'text-mg':'text-yellow-400'}">${fc.enabled!==undefined?String(fc.enabled):'true (default)'}</div></div>
+          <div class="bg-panel-inner rounded p-3 border border-panel-border" title="getParameter flowControlTargetLagSeconds"><div class="text-gray-500 mb-1">targetLagSecs</div><div class="mono font-bold text-blue-400">${fcTargetLagSecs}</div></div>
+          <div class="bg-panel-inner rounded p-3"><div class="text-gray-500 mb-1">Target Rate/s</div><div class="mono">${(fc.targetRateLimit||0).toLocaleString()}</div></div>
+          <div class="bg-panel-inner rounded p-3"><div class="text-gray-500 mb-1">Sustainer Rate</div><div class="mono">${(fc.sustainerRate||0).toLocaleString()}</div></div>
+          <div class="bg-panel-inner rounded p-3"><div class="text-gray-500 mb-1">Tickets/kop</div><div class="mono">${(fc.locksPerKiloOp||0).toFixed(2)}</div></div>
+          <div class="bg-panel-inner rounded p-3"><div class="text-gray-500 mb-1">Lag Count</div><div class="mono ${(fc.isLaggedCount||0)>0?'text-yellow-400':''}">${fc.isLaggedCount||0}</div></div>
+        </div>
+        <div class="flex flex-wrap gap-3 items-end">
+          <div><label class="text-xs text-gray-500 block mb-1">Target Lag (s) <span class="text-blue-400">[current: ${fcTargetLagSecs}]</span></label>
+            <input id="fc-lag" type="number" min="1" value="${fcTargetLagSecs}" class="fi w-28"></div>
+          <button onclick="applyFlowControlLag()" class="btn-sm">Apply Lag</button>
+          <button onclick="toggleFlowControl(${!fcEnabled})" class="${fcEnabled?'btn-danger':'btn-sm'}">
+            ${fcEnabled?'⏹ Disable FC':'▶ Enable FC'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('📊','Server Status',
+      `db.serverStatus() · <code class="text-mg text-xs">${esc(d.host||'')}</code> · v${esc(d.version||'')} · ${esc(d.process||'')}`,
+      `${sel}<button onclick="nav('serverStatus')" class="btn-sm">↻</button>`)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Connections',fmt(conn.current),`avail: ${fmt(conn.available)}`,'text-blue-400')}
+      ${statCard('Net In',fmtB(net.bytesIn||0),`${fmt(net.numRequests)} reqs`,'')}
+      ${statCard('Net Out',fmtB(net.bytesOut||0),'','text-blue-400')}
+      ${statCard('Lock Queue',(gl.currentQueue||{}).total||0,
+        `r:${(gl.currentQueue||{}).readers||0} w:${(gl.currentQueue||{}).writers||0}`,
+        (gl.currentQueue||{}).total>0?'text-yellow-400':'')}
+      ${statCard('Docs Returned',fmt(docs.returned),'','text-mg')}
+      ${statCard('Docs Inserted',fmt(docs.inserted),'','')}
+      ${statCard('Docs Updated',fmt(docs.updated),'','')}
+      ${statCard('Docs Deleted',fmt(docs.deleted),'','')}
+    </div>
+    ${hostInfoSection}
+    ${netComprSection}
+    ${fcSection}
+    <div class="card">
+      <div class="card-header">📋 Command Counters <span class="text-gray-600 font-normal text-xs ml-1">top 25 · scrollable</span></div>
+      <div class="cmd-scroll"><table class="dt">
+        <thead><tr><th>Command</th><th class="text-right">Total</th><th class="text-right">Failed</th><th style="width:180px">Throughput</th></tr></thead>
+        <tbody>${(Array.isArray(cmds)?cmds:[]).map(c=>{
+          const rate=c.Total>0?((1-c.Failed/c.Total)*100).toFixed(1):100;
+          const barW=Math.round((c.Total/maxT)*100);
+          const col=rate>99?'#00ed64':rate>95?'#d29922':'#f85149';
+          return `<tr><td class="mono">${esc(c.Name)}</td>
+            <td class="mono text-right">${c.Total.toLocaleString()}</td>
+            <td class="mono text-right ${c.Failed>0?'text-red-400':''}">${c.Failed.toLocaleString()}</td>
+            <td><div class="flex items-center gap-2">
+              <div class="health-track flex-1"><div class="health-fill" style="width:${barW}%;background:${col}"></div></div>
+              <span class="text-xs text-gray-500 w-10 text-right">${rate}%</span>
+            </div></td></tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>
+    ${jsonCard('ssRaw',d,1,'db.serverStatus()')}
+  </div>`);
+}
+async function toggleFlowControl(enable){
+  const r=await api('/api/rs/flow-control',{uri:ssTargetURI,enable});
+  if(r.error) return toast(r.error,'error');
+  toast(`Flow control ${enable?'enabled':'disabled'} on ${ssTargetURI.replace(/^mongodb:\/\//,'').split('/?')[0]}`,'success');
+  setTimeout(()=>serverStatus(),500);
+}
+async function applyFlowControlLag(){
+  const lag=document.getElementById('fc-lag')?.value; if(!lag) return;
+  const r=await api('/api/rs/flow-control',{uri:ssTargetURI,targetLagSecs:lag});
+  if(r.error) return toast(r.error,'error');
+  toast(`FC target lag → ${lag}s`,'success'); setTimeout(()=>serverStatus(),500);
+}
+
+// ═══════════════════════════════════════════════════════════ DATABASE STATS
+async function dbStats(){
+  const targetURI=topology.type==='sharded'?uri:(rsNodesList()[0]?.uri||uri);
+  const stats=await api('/api/db/stats',{uri:targetURI});
+  if(!Array.isArray(stats)) return setMain(errBox((stats&&stats.error)||'Unexpected response'));
+  const fmtB=b=>{
+    if(b>=1e12)return(b/1e12).toFixed(2)+' TB';
+    if(b>=1e9)return(b/1e9).toFixed(2)+' GB';
+    if(b>=1e6)return(b/1e6).toFixed(1)+' MB';
+    if(b>=1e3)return(b/1e3|0)+' KB';
+    return b+' B';
+  };
+  const totalData=stats.reduce((s,d)=>s+d.dataSize,0)||1;
+  const totalStorage=stats.reduce((s,d)=>s+d.storageSize,0);
+  const totalObjs=stats.reduce((s,d)=>s+d.objects,0);
+  const totalIdxSize=stats.reduce((s,d)=>s+d.indexSize,0);
+  const colors=['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+  const isSharded=topology.type==='sharded';
+
+  const rows=stats.map((d,i)=>{
+    const pct=totalData>0?Math.max(2,Math.round(d.dataSize/totalData*100)):0;
+    const col=colors[i%colors.length];
+    const unsharded=d.collections-d.shardedCollections;
+    const primaryInfo=d.primaryShard?`<span class="text-xs text-gray-500">primary: <span class="mono text-gray-300">${esc(d.primaryShard)}</span></span>`:'';
+
+    // Per-shard distribution mini-bars
+    let shardDistHtml='';
+    if(d.shardDist&&d.shardDist.length>0){
+      shardDistHtml=`<div class="mt-1 space-y-1">
+        ${d.shardDist.map(sd=>`
+          <div class="flex items-center gap-2 text-xs">
+            <span class="mono text-gray-500 w-20 truncate shrink-0">${esc(sd.shardId)}</span>
+            <div class="pct-bar-wrap flex-1"><div class="pct-bar" style="width:${Math.max(1,Math.round(sd.dataPct))}%;background:${col};opacity:.8"></div></div>
+            <span class="mono text-gray-400 w-16 text-right shrink-0">${fmtB(sd.dataSize)}</span>
+            <span class="text-gray-600 w-12 text-right shrink-0">${sd.dataPct.toFixed(1)}%</span>
+            <span class="text-gray-600 w-14 text-right shrink-0">${sd.objPct.toFixed(1)}% docs</span>
+          </div>`).join('')}
+      </div>`;
+    }
+
+    return `<tr>
+      <td>
+        <div class="mono font-semibold">${esc(d.name)}</div>
+        <div class="flex flex-wrap gap-2 mt-1 items-center">
+          ${primaryInfo}
+          ${d.isPartitioned?'<span class="mb b-shard text-xs" style="font-size:.62rem;padding:1px 5px">partitioned</span>':''}
+        </div>
+      </td>
+      <td>
+        <div class="flex items-center gap-2">
+          <div class="db-bar-wrap" style="min-width:80px"><div class="db-bar" style="width:${pct}%;background:${col}"></div></div>
+          <span class="mono text-xs text-gray-300 shrink-0">${fmtB(d.dataSize)}</span>
+        </div>
+        ${shardDistHtml}
+      </td>
+      <td class="mono text-xs text-gray-400">${fmtB(d.storageSize)}</td>
+      <td class="mono text-xs text-gray-400">${fmtB(d.indexSize)}</td>
+      <td class="mono text-xs">${d.objects.toLocaleString()}</td>
+      <td class="text-xs">
+        <span class="text-gray-200 mono">${d.collections}</span>
+        ${isSharded&&d.collections>0?`<div class="text-xs text-gray-600 mt-0.5">
+          <span class="text-blue-400">${d.shardedCollections}</span> sharded
+          · <span class="text-gray-400">${Math.max(0,unsharded)}</span> local
+        </div>`:''}
+      </td>
+      <td class="mono text-xs">${d.indexes}</td>
+    </tr>`;
+  }).join('');
+
+  const chartBars=stats.slice(0,12).map((d,i)=>{
+    const pct=totalData>0?Math.max(2,Math.round(d.dataSize/totalData*80)):0;
+    const col=colors[i%colors.length];
+    return `<div class="flex flex-col items-center gap-1" style="flex:1;min-width:40px;max-width:80px">
+      <div class="text-xs mono text-gray-400">${fmtB(d.dataSize)}</div>
+      <div style="height:80px;width:100%;display:flex;align-items:flex-end;">
+        <div style="width:100%;height:${pct}%;min-height:3px;background:${col};border-radius:3px 3px 0 0;transition:height .6s"></div>
+      </div>
+      <div class="text-xs text-gray-500 truncate w-full text-center" style="max-width:70px" title="${esc(d.name)}">${esc(d.name)}</div>
+    </div>`;
+  }).join('');
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('🗄️','Database Stats',
+      `db.stats() · ${stats.length} databases · via ${topology.type==='sharded'?'mongos':'primary'}`,
+      `<button onclick="nav('dbStats')" class="btn-sm">↻ Refresh</button>`)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Databases',stats.length,'','text-blue-400')}
+      ${statCard('Total Data',fmtB(totalData),'data size','text-mg')}
+      ${statCard('Storage',fmtB(totalStorage),'on disk','')}
+      ${statCard('Index Size',fmtB(totalIdxSize),'','')}
+      ${statCard('Objects',totalObjs.toLocaleString(),'total docs','')}
+      ${statCard('Collections',stats.reduce((s,d)=>s+d.collections,0),'','text-blue-400')}
+      ${isSharded?statCard('Sharded Colls',stats.reduce((s,d)=>s+d.shardedCollections,0),'across all DBs',''):''}
+      ${statCard('Indexes',stats.reduce((s,d)=>s+d.indexes,0),'','')}
+    </div>
+    <div class="card">
+      <div class="card-header">📊 Data Size by Database</div>
+      <div class="p-4">
+        <div class="flex gap-2 items-end border-b border-panel-border pb-2" style="min-height:120px">${chartBars}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📋 All Databases
+        ${isSharded?'<span class="text-gray-600 font-normal text-xs ml-1">· shard distribution shown per DB</span>':''}
+      </div>
+      <div class="overflow-x-auto"><table class="dt">
+        <thead><tr>
+          <th>Database</th><th>Data Size / Shard Distribution</th><th>Storage</th>
+          <th>Index Size</th><th>Objects</th><th>Collections</th><th>Indexes</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+    <div id="csChunkDistSection_placeholder"></div>
+    ${jsonCard('dbStatsRaw',stats,1,'db.stats() + listCollections + config.collections')}
+  </div>`);
+}
+
+async function onChunkDbChange(){
+  const dbName=document.getElementById('chunkDb').value;
+  const collSelect=document.getElementById('chunkColl');
+  collSelect.innerHTML='<option value="">Loading…</option>';
+  document.getElementById('chunkDistContent').innerHTML='';
+  if(!dbName){collSelect.innerHTML='<option value="">Select a collection…</option>';return;}
+  try{
+    const targetURI=topology.type==='sharded'?uri:(rsNodesList()[0]?.uri||uri);
+    const result=await api('/api/db/sharded-collections',{uri:targetURI,db:dbName});
+    const colls=result.collections||[];
+    if(colls.length===0){
+      collSelect.innerHTML='<option value="">No sharded collections in this DB</option>';
+    }else{
+      collSelect.innerHTML='<option value="">Select a collection…</option>'+colls.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    }
+  }catch(e){
+    toast(e.message,'error');
+    collSelect.innerHTML='<option value="">Error loading collections</option>';
+  }
+}
+
+async function onChunkCollChange(){
+  const dbName=document.getElementById('chunkDb').value;
+  const collName=document.getElementById('chunkColl').value;
+  const contentDiv=document.getElementById('chunkDistContent');
+  if(!dbName||!collName){contentDiv.innerHTML='';return;}
+  contentDiv.innerHTML='<div class="flex items-center gap-2 text-gray-500"><div class="spinner"></div> Loading chunk distribution…</div>';
+  try{
+    const targetURI=topology.type==='sharded'?uri:(rsNodesList()[0]?.uri||uri);
+    const ns=dbName+'.'+collName;
+    const result=await api('/api/db/chunk-distribution',{uri:targetURI,ns});
+    displayChunkDistribution(result);
+  }catch(e){
+    contentDiv.innerHTML=errBox(e.message);
+  }
+}
+
+function displayChunkDistribution(data){
+  if(!data||!data.distribution){
+    document.getElementById('chunkDistContent').innerHTML=errBox('Invalid response from server');
+    return;
+  }
+  const colors=['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+  const fmtB=b=>{if(b>=1e12)return(b/1e12).toFixed(2)+' TB';if(b>=1e9)return(b/1e9).toFixed(2)+' GB';if(b>=1e6)return(b/1e6).toFixed(1)+' MB';if(b>=1e3)return(b/1e3|0)+' KB';return b+' B';};
+  const balanceColor=data.balanceScore>=0.8?'text-green-400':data.balanceScore>=0.6?'text-yellow-400':'text-red-400';
+  
+  const distBars=data.distribution.map((d,i)=>{
+    const col=colors[i%colors.length];
+    return `<div class="space-y-1 mb-3">
+      <div class="flex items-center gap-2">
+        <span class="mono text-gray-400 w-24 font-bold">${esc(d.shardId)}</span>
+        <div class="flex-1">
+          <div class="pct-bar-wrap" style="background:#21262d"><div class="pct-bar" style="width:${d.dataPct}%;background:${col};height:6px"></div></div>
+        </div>
+        <span class="mono text-xs w-20 text-right text-gray-300">${fmtB(d.dataSize)}</span>
+        <span class="text-gray-500 text-xs w-12 text-right">${d.dataPct.toFixed(1)}%</span>
+      </div>
+      <div class="flex items-center gap-2 ml-24 text-xs text-gray-600">
+        <span class="text-gray-500">Chunks:</span>
+        <span class="mono font-semibold text-blue-400">${d.chunkCount}</span>
+        <span class="text-gray-600">(${d.chunkPct.toFixed(1)}%) ·</span>
+        <span class="text-gray-500">Docs:</span>
+        <span class="mono text-blue-400">${d.objects.toLocaleString()}</span>
+        <span class="text-gray-600">(${d.objPct.toFixed(1)}%)</span>
+      </div>
+    </div>`;
+  }).join('');
+  
+  document.getElementById('chunkDistContent').innerHTML=`<div class="space-y-3"><div class="grid grid-cols-3 gap-3">${statCard('Total Chunks',data.totalChunks,'','')}${statCard('Shard Key',data.shardKey||'?','','text-blue-400')}<div class="bg-panel-inner border border-panel-border rounded-lg p-4"><div class="text-xs text-gray-500 uppercase tracking-wide">Balance</div><div class="text-2xl font-bold ${balanceColor}">${(data.balanceScore*100).toFixed(0)}%</div></div></div><div><div class="text-xs font-bold text-gray-500 mb-3">Distribution by Data Size</div><div class="space-y-0">${distBars}</div></div></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════ CURRENT OPS
+async function currentOp(filter){
+  if(filter!==undefined&&(filter==='active'||filter==='all')) opFilter=filter;
+  if(!opTargetURI) opTargetURI=uri;
+
+  const sel=instanceSelect(opTargetURI,'setOpURI');
+  const headerActions=`<div class="flex gap-2 flex-wrap">${sel}
+    <button onclick="currentOp('active')" class="btn-sm ${opFilter==='active'?'btn-active':''}">Active only</button>
+    <button onclick="currentOp('all')"    class="btn-sm ${opFilter==='all'?'btn-active':''}">All</button>
+    <button onclick="currentOp()" class="btn-sm">↻</button>
+    <button onclick="openBatchKillModal()" class="btn-danger">⚡ Batch Kill…</button>
+  </div>`;
+
+  const d=await api('/api/current-op',{uri:opTargetURI});
+  if(d.error) return setMainWithError('⚡','Current Operations',headerActions,d.error,opTargetURI);
+  let ops=d.inprog||[];
+  const totalAll=ops.length, totalActive=ops.filter(o=>o.active).length;
+  if(opFilter==='active') ops=ops.filter(o=>o.active);
+
+  opCurrentList = ops;
+
+  const nsSet  = [...new Set(ops.map(o=>o.ns).filter(Boolean))].sort();
+  const opSet  = [...new Set(ops.map(o=>o.op).filter(Boolean))].sort();
+  const appSet = [...new Set(ops.map(o=>o.appName).filter(Boolean))].sort();
+  window._opNsList  = nsSet;
+  window._opOpList  = opSet;
+  window._opAppList = appSet;
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('⚡','Current Operations',
+      `db.currentOp() · ${totalAll} total · ${totalActive} active`,
+      `<div class="flex gap-2 flex-wrap">${sel}
+        <button onclick="currentOp('active')" class="btn-sm ${opFilter==='active'?'btn-active':''}">Active only</button>
+        <button onclick="currentOp('all')"    class="btn-sm ${opFilter==='all'?'btn-active':''}">All</button>
+        <button onclick="currentOp()" class="btn-sm">↻</button>
+        <button onclick="openBatchKillModal()" class="btn-danger">⚡ Batch Kill…</button>
+      </div>`)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Shown',ops.length,opFilter+' filter','')}
+      ${statCard('Lock Waits',ops.filter(o=>o.waitingForLock).length,'',ops.some(o=>o.waitingForLock)?'text-yellow-400':'text-mg')}
+      ${statCard('Slow >30s',ops.filter(o=>(o.secs_running||0)>=30).length,'',ops.some(o=>(o.secs_running||0)>=30)?'text-red-400':'text-mg')}
+      ${statCard('Apps',new Set(ops.map(o=>o.appName).filter(Boolean)).size,'','')}
+    </div>
+    <div class="card">
+      <div class="card-header">📋 Operations
+        <span class="text-gray-600 font-normal text-xs ml-1">click column headers to sort · click row to expand</span>
+        <div class="flex gap-2 ml-auto">
+          <button onclick="opToggleView('list')"  class="btn-sm ${opView==='list'?'btn-active':''}">List</button>
+          <button onclick="opToggleView('group')" class="btn-sm ${opView==='group'?'btn-active':''}">Group by Host</button>
+        </div>
+      </div>
+      <div id="opTableWrap">${opView==='group' ? buildOpGroupTable() : buildOpTable()}</div>
+    </div>
+    ${jsonCard('opRaw',d,1,'db.adminCommand({$currentOp:{allUsers:true,idleConnections:true,localOps:true}})')}
+  </div>`);
+}
+function setOpURI(u){opTargetURI=u;currentOp();}
+function toggleDetail(id){document.getElementById(id)?.classList.toggle('open');}
+
+// ── helpers: extract hostname from "host:port" client string ──────────────────
+function opClientHost(client){
+  if(!client) return '(unknown)';
+  // IPv6 bracketed: [::1]:port
+  if(client.startsWith('[')){
+    const e=client.lastIndexOf(']');
+    return e>0 ? client.slice(1,e) : client;
+  }
+  const parts=client.split(':');
+  return parts.length>1 ? parts.slice(0,-1).join(':') : client;
+}
+
+// ── List view ─────────────────────────────────────────────────────────────────
+function buildOpTable(){
+  const secsCls=s=>s<5?'op-fast':s<30?'op-mid':'op-slow';
+  const secsLbl=s=>`<span class="mb ${secsCls(s)} mono">${s}s</span>`;
+  const cols=[
+    {key:'opid',         label:'OpID',      num:false},
+    {key:'desc',         label:'Desc',      num:false},
+    {key:'op',           label:'Type',      num:false},
+    {key:'ns',           label:'Namespace', num:false},
+    {key:'client',       label:'Client',    num:false},
+    {key:'appName',      label:'App',       num:false},
+    {key:'secs_running', label:'Runtime',   num:true },
+    {key:'planSummary',  label:'Plan',      num:false},
+    {key:'waitingForLock',label:'Lock',     num:false},
+  ];
+  const thStyle='cursor-pointer select-none hover:text-gray-200 whitespace-nowrap';
+  const arrow=k=>opSortCol===k?(opSortDir==='desc'?' ↓':' ↑'):'';
+  const headers=cols.map(c=>
+    `<th class="${thStyle}" onclick="opSort('${c.key}')">${c.label}${arrow(c.key)}</th>`
+  ).join('')+'<th></th><th></th>';
+
+  const sorted=[...opCurrentList].sort((a,b)=>{
+    let av=a[opSortCol], bv=b[opSortCol];
+    if(av==null&&bv==null) return 0;
+    if(av==null) return 1; if(bv==null) return -1;
+    let cmp=(typeof av==='number'&&typeof bv==='number')
+      ? av-bv : String(av).localeCompare(String(bv));
+    return opSortDir==='desc'?-cmp:cmp;
+  });
+
+  const rows=sorted.map(op=>{
+    const id='od-'+op.opid;
+    const meta=JSON.stringify(op.clientMetadata||{},null,2);
+    const cmd=JSON.stringify(op.command||{},null,2);
+    const isKillable=op.active||(op.secs_running||0)>0;
+    const opidStr=String(op.opid||'');
+    return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="toggleDetail('${id}')">
+      <td class="mono text-xs">${esc(opidStr)}</td>
+      <td class="mono text-xs text-gray-400 max-w-[120px] truncate" title="${esc(op.desc||'')}">${esc(op.desc||'')}</td>
+      <td><span class="mb b-SECONDARY">${esc(op.op||'?')}</span></td>
+      <td class="mono text-xs text-gray-400">${esc(op.ns||'')}</td>
+      <td class="mono text-xs text-gray-500">${esc(op.client||'')}</td>
+      <td class="text-xs">${esc(op.appName||'')}</td>
+      <td>${secsLbl(op.secs_running||0)}</td>
+      <td class="mono text-xs text-gray-500 max-w-[120px] truncate">${esc(op.planSummary||'')}</td>
+      <td>${op.waitingForLock?'<span class="text-yellow-400">⚠</span>':'<span class="text-gray-700">—</span>'}</td>
+      <td onclick="event.stopPropagation()">
+        ${isKillable
+          ?`<button onclick="killSingleOp('${esc(opidStr)}')" class="btn-xs" style="color:#f87171;border-color:#7f1d1d" title="Kill this operation">✕ Kill</button>`
+          :'<span class="text-gray-700 text-xs">—</span>'}
+      </td>
+      <td class="text-gray-600 text-xs">▼</td>
+    </tr>
+    <tr id="${id}" class="op-detail"><td colspan="11" class="p-0 bg-panel-inner">
+      <div class="p-4 grid grid-cols-2 gap-4">
+        <div><div class="text-xs font-bold text-gray-500 uppercase mb-2">Client Metadata</div>
+          <pre class="text-xs mono text-gray-300 bg-panel rounded p-3 overflow-auto max-h-52 whitespace-pre-wrap">${esc(meta)}</pre></div>
+        <div><div class="text-xs font-bold text-gray-500 uppercase mb-2">Command</div>
+          <pre class="text-xs mono text-gray-300 bg-panel rounded p-3 overflow-auto max-h-52 whitespace-pre-wrap">${esc(cmd)}</pre></div>
+        <div class="col-span-2 flex flex-wrap gap-5 text-xs">
+          <span class="text-gray-500">Desc: <code class="text-gray-300">${esc(op.desc||'')}</code></span>
+          <span class="text-gray-500">Yields: <code class="text-gray-300">${op.numYields||0}</code></span>
+          <span class="text-gray-500">Keys Exam: <code class="text-gray-300">${op.keysExamined||0}</code></span>
+          <span class="text-gray-500">Docs Exam: <code class="text-gray-300">${op.docsExamined||0}</code></span>
+          <span class="text-gray-500">µs Running: <code class="text-gray-300">${(op.microsecs_running||0).toLocaleString()}</code></span>
+          <span class="text-gray-500">Active: <code class="${op.active?'text-mg':'text-gray-400'}">${op.active}</code></span>
+          <span class="text-gray-500">Lock Wait: <code class="${op.waitingForLock?'text-yellow-400':'text-gray-400'}">${op.waitingForLock||false}</code></span>
+        </div>
+      </div>
+    </td></tr>`;
+  }).join('');
+
+  return `<table class="dt">
+    <thead><tr>${headers}</tr></thead>
+    <tbody>${rows||'<tr><td colspan="11" class="text-center text-gray-600 py-8">No operations match</td></tr>'}</tbody>
+  </table>`;
+}
+
+function opSort(col){
+  if(opSortCol===col) opSortDir=opSortDir==='desc'?'asc':'desc';
+  else{opSortCol=col;opSortDir='desc';}
+  const w=document.getElementById('opTableWrap');
+  if(w) w.innerHTML=buildOpTable();
+}
+
+// ── Group-by-host view ────────────────────────────────────────────────────────
+function buildOpGroupTable(){
+  // Build groups keyed by hostname
+  const groups={};
+  for(const op of opCurrentList){
+    const host=opClientHost(op.client||'');
+    if(!groups[host]) groups[host]={host,count:0,active:0,apps:new Set(),opTypes:new Set(),lockWaits:0,maxSecs:0};
+    const g=groups[host];
+    g.count++;
+    if(op.active) g.active++;
+    if(op.appName) g.apps.add(op.appName);
+    if(op.op) g.opTypes.add(op.op);
+    if(op.waitingForLock) g.lockWaits++;
+    g.maxSecs=Math.max(g.maxSecs, op.secs_running||0);
+  }
+
+  const rows=Object.values(groups)
+    .sort((a,b)=>b.count-a.count)
+    .map(g=>{
+      const apps=[...g.apps].sort().join(', ')||'—';
+      const types=[...g.opTypes].sort().join(', ')||'—';
+      const lockBadge=g.lockWaits>0?`<span class="text-yellow-400 ml-1">⚠ ${g.lockWaits}</span>`:'';
+      const secsCls=s=>s<5?'op-fast':s<30?'op-mid':'op-slow';
+      return `<tr>
+        <td class="mono text-xs">${esc(g.host)}</td>
+        <td class="mono text-xs font-bold text-mg">${g.count}</td>
+        <td class="mono text-xs">${g.active}${lockBadge}</td>
+        <td class="mono text-xs"><span class="mb ${secsCls(g.maxSecs)}">${g.maxSecs}s</span></td>
+        <td class="text-xs text-gray-300">${esc(apps)}</td>
+        <td class="mono text-xs text-gray-400">${esc(types)}</td>
+      </tr>`;
+    }).join('');
+
+  return `<table class="dt">
+    <thead><tr>
+      <th>Client Host</th><th>Connections</th><th>Active</th><th>Max Runtime</th><th>App(s)</th><th>Op Types</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="6" class="text-center text-gray-600 py-8">No operations</td></tr>'}</tbody>
+  </table>`;
+}
+
+function opToggleView(v){
+  opView=v;
+  const w=document.getElementById('opTableWrap');
+  if(!w) return;
+  // Update active state on the two toggle buttons
+  document.querySelectorAll('#opTableWrap').forEach(()=>{});
+  const btns=document.querySelectorAll('[onclick^="opToggleView"]');
+  btns.forEach(b=>{ const bv=b.getAttribute('onclick').includes("'list'")?'list':'group'; b.classList.toggle('btn-active',bv===v); });
+  w.innerHTML=v==='group'?buildOpGroupTable():buildOpTable();
+}
+
+
+async function killSingleOp(opid) {
+  if(!confirm(`Kill operation ${opid}?`)) return;
+  const r = await api('/api/kill-op', {uri: opTargetURI, opid});
+  if(r && r.error) return toast(r.error, 'error');
+  toast(`Killed op ${opid}`, 'success');
+  setTimeout(() => currentOp(), 800);
+}
+
+function openBatchKillModal() {
+  // Populate dropdowns from stored op data
+  const nsSel  = document.getElementById('bkNs');
+  const opSel  = document.getElementById('bkOp');
+  const appSel = document.getElementById('bkApp');
+  if(nsSel)  nsSel.innerHTML  = '<option value="">Any namespace</option>'  + (window._opNsList||[]).map(v=>`<option>${esc(v)}</option>`).join('');
+  if(opSel)  opSel.innerHTML  = '<option value="">Any op type</option>'   + (window._opOpList||[]).map(v=>`<option>${esc(v)}</option>`).join('');
+  if(appSel) appSel.innerHTML = '<option value="">Any app</option>'       + (window._opAppList||[]).map(v=>`<option>${esc(v)}</option>`).join('');
+  document.getElementById('bkMinSecs').value = '30';
+  document.getElementById('bkResult').textContent = '';
+  document.getElementById('batchKillModal').classList.add('open');
+}
+
+function closeBatchKillModal() { document.getElementById('batchKillModal').classList.remove('open'); }
+
+async function previewBatchKill() {
+  const params = _batchKillParams();
+  const d = await api('/api/current-op', {uri: opTargetURI});
+  if(d.error) { toast(d.error,'error'); return; }
+  const all = d.inprog || [];
+  const matched = all.filter(op => _matchesBatchFilter(op, params));
+  const el = document.getElementById('bkResult');
+  if(matched.length === 0) {
+    el.innerHTML = '<span class="text-gray-500">No operations match these filters</span>';
+  } else {
+    el.innerHTML = `<div class="text-yellow-400 font-bold mb-2">${matched.length} operation(s) will be killed:</div>` +
+      matched.map(op =>
+        `<div class="mono text-xs text-gray-300">opid <span class="text-mg">${esc(String(op.opid))}</span> · ${esc(op.op||'?')} · ${esc(op.ns||'')} · <span class="${(op.secs_running||0)>=30?'text-red-400':'text-yellow-400'}">${op.secs_running||0}s</span>${op.appName?' · '+esc(op.appName):''}</div>`
+      ).join('');
+  }
+}
+
+async function executeBatchKill() {
+  const params = _batchKillParams();
+  if(!confirm(`Kill operations matching these filters on ${opTargetURI.replace(/^mongodb:\/\//,'').split('/?')[0]}?`)) return;
+  const r = await api('/api/kill-op', {uri: opTargetURI, batch: 'true', ...params});
+  closeBatchKillModal();
+  if(r && r.error) return toast(r.error, 'error');
+  const errs = (r.errors||[]).length;
+  toast(`Killed ${r.killed} operation(s)${errs ? ` · ${errs} error(s)` : ''}`, r.killed > 0 ? 'success' : 'error');
+  setTimeout(() => currentOp(), 800);
+}
+
+function _batchKillParams() {
+  return {
+    op:       document.getElementById('bkOp')?.value      || '',
+    ns:       document.getElementById('bkNs')?.value      || '',
+    app:      document.getElementById('bkApp')?.value     || '',
+    min_secs: document.getElementById('bkMinSecs')?.value || '0',
+  };
+}
+
+function _matchesBatchFilter(op, p) {
+  if(p.op       && (op.op||'').toLowerCase() !== p.op.toLowerCase()) return false;
+  if(p.ns       && !(op.ns||'').includes(p.ns))                      return false;
+  if(p.app) {
+    const appName = op.clientMetadata?.application?.name || op.appName || '';
+    if(!appName.includes(p.app)) return false;
+  }
+  const minSecs = parseInt(p.min_secs)||0;
+  if((op.secs_running||0) < minSecs) return false;
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════ USERS & ROLES
+
+// Build a replica-set selector (one entry per RS, uses primaryPreferred)
+function rsSelect(currentURI, onchangeFn) {
+  const rsList = rsNodesList();
+  if (rsList.length === 0) return ''; // plain RS — no selector needed
+  return `<div class="flex items-center gap-2">
+    <span class="text-xs text-gray-500">Replica Set:</span>
+    <select onchange="${onchangeFn}(this.value)" class="fi text-xs">
+      ${rsList.map(n => {
+        const base = injectCredsIntoUri(n.uri);
+        const sep = base.includes('?') ? '&' : '?';
+        const ppUri = base + sep + 'readPreference=primaryPreferred';
+        return `<option value="${esc(ppUri)}" ${ppUri===currentURI||base===currentURI?'selected':''}>${esc(n.id)} (${esc(n.role)})</option>`;
+      }).join('')}
+    </select>
+  </div>`;
+}
+
+async function usersRoles(targetURI) {
+  if (targetURI) usersRolesURI = targetURI;
+  if (!usersRolesURI) {
+    // Default: first RS node with primaryPreferred, or connected URI
+    const first = rsNodesList()[0];
+    if (first) {
+      const sep = first.uri.includes('?') ? '&' : '?';
+      usersRolesURI = first.uri + sep + 'readPreference=primaryPreferred';
+    } else {
+      usersRolesURI = uri;
+    }
+  }
+
+  // Persist DB selection from DOM before any re-render
+  const domDb = document.getElementById('urDbSelect')?.value;
+  if (domDb) urSelectedDb = domDb;
+
+  const rsSel = rsSelect(usersRolesURI, 'setUsersRolesURI');
+
+  const dbsRes = await api('/api/db/stats', {uri: usersRolesURI});
+  if (!Array.isArray(dbsRes))
+    return setMain(errBox((dbsRes && dbsRes.error) || 'Failed to load databases'));
+
+  const dbOptions = dbsRes.map(d =>
+    `<option value="${esc(d.name)}" ${d.name===urSelectedDb?'selected':''}>${esc(d.name)}</option>`
+  ).join('');
+
+  const dbSel = `<div class="flex items-center gap-2">
+    <span class="text-xs text-gray-500">Database:</span>
+    <select id="urDbSelect" onchange="urSelectedDb=this.value;usersRoles()" class="fi text-xs">
+      <option value="">Select database…</option>${dbOptions}
+    </select>
+  </div>`;
+
+  const headerActions = `<div class="flex gap-2 flex-wrap items-center">
+    ${rsSel}${dbSel}
+    <button onclick="usersRoles()" class="btn-sm">↻</button>
+  </div>`;
+
+  if (!urSelectedDb) {
+    setMain(`<div class="space-y-5">
+      ${pageHeader('👥','Users & Roles','Select replica set and database', headerActions)}
+      <div class="text-gray-500 text-sm">Select a database to view and manage users and roles.</div>
+    </div>`);
+    return;
+  }
+
+  setLoading();
+
+  try {
+    const [rolesRes, usersRes] = await Promise.all([
+      api('/api/user/roles', {uri: usersRolesURI, db: urSelectedDb}),
+      api('/api/user/users', {uri: usersRolesURI, db: urSelectedDb}),
+    ]);
+
+    if (!rolesRes || rolesRes.error) return setMain(errBox(rolesRes ? rolesRes.error : 'No response (roles)'));
+    if (!usersRes || usersRes.error) return setMain(errBox(usersRes ? usersRes.error : 'No response (users)'));
+
+    const allRoles    = Array.isArray(rolesRes) ? rolesRes : [];
+    const users       = Array.isArray(usersRes)  ? usersRes  : [];
+    const customRoles  = allRoles.filter(r => !r.isBuiltin);
+    const builtinRoles = allRoles.filter(r =>  r.isBuiltin);
+    const visibleRoles = urShowBuiltin ? allRoles : customRoles;
+
+    const roleRows = visibleRoles.map(r => {
+      const detailId = 'rd-' + r.name.replace(/\W/g,'_');
+      return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="toggleRoleDetail('${detailId}','${esc(r.name)}','${esc(urSelectedDb)}')">
+        <td class="mono font-semibold ${r.isBuiltin ? 'text-gray-400' : 'text-mg'}">${esc(r.name)}</td>
+        <td class="mono text-xs">${esc(r.db)}</td>
+        <td class="text-xs">${r.inheritedRoles && r.inheritedRoles.length
+          ? r.inheritedRoles.map(ir => `<span class="mb b-secondary" style="font-size:.6rem">${esc(typeof ir==='string'?ir:ir.role)}</span>`).join(' ')
+          : '<span class="text-gray-600">—</span>'}</td>
+        <td class="text-right">
+          ${r.isBuiltin ? '<span class="text-xs text-gray-600">built-in</span>' : `
+            <button onclick="event.stopPropagation();openEditRoleModal('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️</button>
+            <button onclick="event.stopPropagation();deleteRole('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>
+          `}
+        </td>
+        <td class="text-gray-600 text-xs">▼</td>
+      </tr>
+      <tr id="${detailId}" class="op-detail"><td colspan="5" class="p-0 bg-panel-inner">
+        <div id="${detailId}-content" class="p-4 text-xs text-gray-500 mono">Loading…</div>
+      </td></tr>`;
+    }).join('');
+
+    const userRows = users.map(u => `<tr>
+      <td class="mono font-semibold">${esc(u.username)}</td>
+      <td class="mono text-xs">${esc(u.database)}</td>
+      <td class="text-xs">${u.roles && u.roles.length
+        ? u.roles.map(role => `<span class="mb b-ok" style="font-size:.6rem">${esc(role)}</span>`).join(' ')
+        : '<span class="text-gray-600">no roles</span>'}</td>
+      <td class="text-right">
+        <button onclick="editUserRoles('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️ Edit roles</button>
+        <button onclick="deleteUser('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>
+      </td>
+    </tr>`).join('');
+
+    // Rebuild header actions with selected db reflected
+    const dbOptions2 = dbsRes.map(d =>
+      `<option value="${esc(d.name)}" ${d.name===urSelectedDb?'selected':''}>${esc(d.name)}</option>`
+    ).join('');
+    const headerActions2 = `<div class="flex gap-2 flex-wrap items-center">
+      ${rsSel}
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-gray-500">Database:</span>
+        <select id="urDbSelect" onchange="urSelectedDb=this.value;usersRoles()" class="fi text-xs">
+          <option value="">Select database…</option>${dbOptions2}
+        </select>
+      </div>
+      <button onclick="usersRoles()" class="btn-sm">↻</button>
+    </div>`;
+
+    setMain(`<div class="space-y-5">
+      ${pageHeader('👥','Users & Roles',
+        `${customRoles.length} custom roles · ${builtinRoles.length} built-in · ${users.length} users`,
+        headerActions2)}
+
+      <div class="card">
+        <div class="card-header">🔐 Roles
+          <span class="text-gray-600 font-normal text-xs ml-1">${visibleRoles.length} shown</span>
+          <div class="flex gap-2 ml-auto">
+            <button onclick="urShowBuiltin=!urShowBuiltin;usersRoles()"
+              class="btn-sm ${urShowBuiltin ? 'btn-active' : ''}">
+              ${urShowBuiltin ? '👁 Hide built-in' : '👁 Show built-in'}
+            </button>
+            <button onclick="openCreateRoleModal('${esc(urSelectedDb)}')" class="btn-sm">➕ Create Role</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto"><table class="dt">
+          <thead><tr><th>Name</th><th>Database</th><th>Inherited Roles</th><th></th><th></th></tr></thead>
+          <tbody>${roleRows || `<tr><td colspan="5" class="text-center text-gray-600 py-6">${
+            urShowBuiltin ? 'No roles defined'
+            : 'No custom roles — <a class="text-mg cursor-pointer" onclick="urShowBuiltin=true;usersRoles()">show built-in roles</a>'
+          }</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">👤 Users
+          <button onclick="openCreateUserModal('${esc(urSelectedDb)}')" class="btn-sm ml-auto">➕ Create User</button>
+        </div>
+        <div class="overflow-x-auto"><table class="dt">
+          <thead><tr><th>Username</th><th>Database</th><th>Roles</th><th></th></tr></thead>
+          <tbody>${userRows || '<tr><td colspan="4" class="text-center text-gray-600 py-6">No users</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>`);
+  } catch(e) {
+    setMain(errBox('Error: ' + e.message));
+  }
+}
+
+function setUsersRolesURI(u) { usersRolesURI = u; usersRoles(); }
+
+// Toggle role detail row and lazy-load privileges
+async function toggleRoleDetail(detailId, roleName, db) {
+  const row = document.getElementById(detailId);
+  if(!row) return;
+  const isOpen = row.classList.contains('open');
+  row.classList.toggle('open');
+  if(isOpen) return; // closing — no need to fetch
+
+  const contentEl = document.getElementById(detailId + '-content');
+  contentEl.innerHTML = '<div class="flex items-center gap-2"><div class="spinner"></div> Loading privileges…</div>';
+
+  const res = await api('/api/user/role-detail', {uri: usersRolesURI, db, roleName});
+  if(!res || res.error) {
+    contentEl.innerHTML = `<span class="text-red-400">${esc(res ? res.error : 'Failed to load')}</span>`;
+    return;
+  }
+
+  const privs = res.privileges || [];
+  const inherited = res.inheritedRoles || [];
+
+  let html = '';
+
+  if(inherited.length) {
+    html += `<div class="mb-3"><div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Inherits From</div>
+      <div class="flex flex-wrap gap-1">${inherited.map(ir => `<span class="mb b-secondary" style="font-size:.65rem">${esc(ir.role||ir)}</span>`).join('')}</div></div>`;
+  }
+
+  if(privs.length) {
+    const rows = privs.map(p => {
+      const resource = p.resource || {};
+      let resStr;
+      if(resource.cluster) resStr = '<span class="text-yellow-400">cluster</span>';
+      else if(resource.anyResource) resStr = '<span class="text-yellow-400">anyResource</span>';
+      else {
+        const db2 = resource.db || ''; const coll = resource.collection || '';
+        resStr = `<span class="text-blue-400">${esc(db2 || '*')}</span>.<span class="text-green-400">${esc(coll || '*')}</span>`;
+      }
+      const actions = (p.actions || []).map(a => `<span class="text-xs px-1 py-0.5 rounded bg-panel text-gray-300">${esc(a)}</span>`).join(' ');
+      return `<tr><td>${resStr}</td><td class="text-xs">${actions}</td></tr>`;
+    }).join('');
+    html += `<div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Privileges (${privs.length})</div>
+      <table class="dt dt-sm"><thead><tr><th>Resource</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
+    html += '<span class="text-gray-600">No direct privileges</span>';
+  }
+
+  contentEl.innerHTML = html;
+}
+
+async function deleteRole(roleName, db) {
+  if(!confirm(`Delete role "${roleName}"?`)) return;
+  const r = await api('/api/user/delete-role', {uri: usersRolesURI, roleName, db});
+  if(r && r.error) return toast(r.error, 'error');
+  toast((r && r.message) || 'Role deleted', 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+
+// ── PRIVILEGE ACTION CATEGORIES ───────────────────────────────────────────────
+const PRIV_ACTIONS = {
+  'Query & Write':   ['find','insert','update','remove','bypassDocumentValidation','useUUID'],
+  'Indexes':         ['createIndex','dropIndex','listIndexes','reIndex','compact'],
+  'Collections':     ['createCollection','dropCollection','renameCollectionSameDB','listCollections','convertToCapped','emptycapped','collStats','dbStats','collMod'],
+  'Users & Roles':   ['createUser','dropUser','updateUser','viewUser','changeOwnPassword','changeAnyPassword',
+                      'createRole','dropRole','updateRole','viewRole','grantRole','revokeRole','grantRolesToAnyUser','revokeRoleFromAnyUser'],
+  'Replication':     ['replSetConfigure','replSetGetConfig','replSetGetStatus','replSetStateChange','resync'],
+  'Sharding':        ['enableSharding','moveChunk','splitChunk','splitVector','addShard','removeShard','flushRouterConfig','getShardVersion','shardingState','checkMetadataConsistency'],
+  'Server':          ['serverStatus','top','connPoolStats','connPoolSync','hostInfo','netstat','diagLogging','getCmdLineOpts','getLog','getParameter','setParameter','shutdown','killop','killAnyCursor','killAnySession','fsync','fsyncUnlock','logRotate','impersonate','inprog','invalidateUserCache','cpuProfiler','storageDetails'],
+  'Database':        ['dropDatabase','repairDatabase','touch','indexStats','applyOps','cleanupOrphaned'],
+};
+
+// ── ROLE MODAL STATE ───────────────────────────────────────────────────────────
+let _rolePrivileges  = []; // [{resource:{db,collection,cluster}, actions:[...]}]
+let _roleInherited   = []; // [{role, db}]
+let _userRoles       = []; // [{role, db}]
+let _availableRoles  = []; // RoleInfo[] fetched from backend
+
+function _privRender() {
+  const list = document.getElementById('privilegesList');
+  const empty = document.getElementById('privilegesEmpty');
+  if (!list) return;
+  if (_rolePrivileges.length === 0) {
+    list.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  list.innerHTML = _rolePrivileges.map((p, i) => {
+    const r = p.resource || {};
+    let resLabel;
+    if (r.cluster)     resLabel = 'cluster';
+    else if (r.anyResource) resLabel = 'anyResource';
+    else resLabel = (r.db||'*') + '.' + (r.collection||'*');
+
+    // Build action checkboxes by category
+    const cats = Object.entries(PRIV_ACTIONS).map(([cat, acts]) => {
+      const boxes = acts.map(a => {
+        const checked = (p.actions||[]).includes(a) ? 'checked' : '';
+        return `<label class="flex items-center gap-1 text-xs cursor-pointer whitespace-nowrap">
+          <input type="checkbox" ${checked} onchange="_privToggleAction(${i},'${a}',this.checked)" class="accent-mg"> ${a}
+        </label>`;
+      }).join('');
+      return `<div class="mb-2"><div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">${cat}</div>
+        <div class="flex flex-wrap gap-x-3 gap-y-1">${boxes}</div></div>`;
+    }).join('');
+
+    return `<div class="border border-panel-border rounded p-3 space-y-2 bg-panel-inner">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold text-gray-300">Resource:</span>
+        <select onchange="_privSetResType(${i},this.value)" class="fi text-xs">
+          <option value="ns"     ${!r.cluster&&!r.anyResource?'selected':''}>db.collection</option>
+          <option value="db"     ${!r.cluster&&!r.anyResource&&!r.collection?'selected':''}>whole db</option>
+          <option value="any"    ${r.anyResource?'selected':''}>anyResource</option>
+          <option value="cluster"${r.cluster?'selected':''}>cluster</option>
+        </select>
+        ${!r.cluster && !r.anyResource ? `
+          <input type="text" value="${esc(r.db||'')}" placeholder="db" oninput="_privSetDb(${i},this.value)" class="fi text-xs w-24">
+          <span class="text-gray-600">.</span>
+          <input type="text" value="${esc(r.collection||'')}" placeholder="collection (*=any)" oninput="_privSetColl(${i},this.value)" class="fi text-xs w-28">
+        ` : `<span class="text-blue-400 mono text-xs">${resLabel}</span>`}
+        <button onclick="_privRemove(${i})" class="btn-xs ml-auto">🗑</button>
+      </div>
+      <div class="max-h-48 overflow-y-auto pr-1">${cats}</div>
+    </div>`;
+  }).join('');
+}
+
+function privAdd() {
+  _rolePrivileges.push({resource: {db:'', collection:''}, actions: []});
+  _privRender();
+}
+function _privRemove(i) { _rolePrivileges.splice(i,1); _privRender(); }
+function _privToggleAction(i, action, on) {
+  const p = _rolePrivileges[i];
+  if (!p) return;
+  if (!p.actions) p.actions = [];
+  if (on) { if (!p.actions.includes(action)) p.actions.push(action); }
+  else p.actions = p.actions.filter(a => a !== action);
+}
+function _privSetResType(i, type) {
+  const p = _rolePrivileges[i];
+  if (!p) return;
+  if      (type === 'cluster') p.resource = {cluster: true};
+  else if (type === 'any')     p.resource = {anyResource: true};
+  else if (type === 'db')      p.resource = {db: p.resource.db||'', collection: ''};
+  else                         p.resource = {db: p.resource.db||'', collection: ''};
+  _privRender();
+}
+function _privSetDb(i, v)   { if (_rolePrivileges[i]) _rolePrivileges[i].resource.db = v; }
+function _privSetColl(i, v) { if (_rolePrivileges[i]) _rolePrivileges[i].resource.collection = v; }
+
+function _inheritRender() {
+  const el = document.getElementById('inheritedRolesList');
+  const empty = document.getElementById('inheritedRolesEmpty');
+  if (!el) return;
+  const currentDb = document.getElementById('createRoleDb')?.value || urSelectedDb;
+  const chips = _roleInherited.map((r,i) => {
+    const dbSuffix = (r.db && r.db !== currentDb) ? `<span class="opacity-60">@${esc(r.db)}</span>` : '';
+    return `<span class="mb b-secondary" style="font-size:.65rem">${esc(r.role)}${dbSuffix}
+      <button onclick="_inheritRemove(${i})" class="ml-1 opacity-60 hover:opacity-100">×</button>
+    </span>`;
+  }).join('');
+  el.innerHTML = chips || '';
+  if (empty) empty.style.display = _roleInherited.length ? 'none' : '';
+}
+function _inheritRemove(i) { _roleInherited.splice(i,1); _inheritRender(); }
+function roleInheritAdd() {
+  const sel = document.getElementById('inheritRolePicker');
+  if (!sel || !sel.value) return;
+  const sepIdx = sel.value.lastIndexOf('||');
+  const role = sel.value.substring(0, sepIdx);
+  const db   = sel.value.substring(sepIdx + 2) || document.getElementById('createRoleDb')?.value || urSelectedDb;
+  if (_roleInherited.find(r => r.role===role && r.db===db)) return;
+  _roleInherited.push({role, db});
+  _inheritRender();
+  sel.value = '';
+}
+
+function _populateRolePicker(pickerId) {
+  const sel = document.getElementById(pickerId);
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Pick a role…</option>' +
+    _availableRoles.map(r => {
+      const roleDb = r.db || '';
+      return `<option value="${esc(r.name + '||' + roleDb)}">${esc(r.name)} (${esc(roleDb || r.name)})</option>`;
+    }).join('');
+}
+
+async function openCreateRoleModal(db) {
+  document.getElementById('createRoleDb').value = db;
+  document.getElementById('createRoleIsEdit').value = '';
+  document.getElementById('createRoleName').value = '';
+  document.getElementById('createRoleName').readOnly = false;
+  document.getElementById('createRoleTitle').textContent = '🔐 Create Role';
+  document.getElementById('createRoleSubmitBtn').textContent = 'Create';
+  _rolePrivileges = []; _roleInherited = [];
+  _privRender(); _inheritRender();
+  // Fetch available roles for picker
+  const res = await api('/api/user/roles', {uri: usersRolesURI, db});
+  _availableRoles = Array.isArray(res) ? res : [];
+  _populateRolePicker('inheritRolePicker');
+  document.getElementById('createRoleModal').classList.add('open');
+  document.getElementById('createRoleName').focus();
+}
+
+async function openEditRoleModal(roleName, db) {
+  document.getElementById('createRoleDb').value = db;
+  document.getElementById('createRoleIsEdit').value = '1';
+  document.getElementById('createRoleName').value = roleName;
+  document.getElementById('createRoleName').readOnly = true;
+  document.getElementById('createRoleTitle').textContent = '✏️ Edit Role: ' + roleName;
+  document.getElementById('createRoleSubmitBtn').textContent = 'Save';
+  _rolePrivileges = []; _roleInherited = [];
+  _privRender(); _inheritRender();
+  // Fetch full role detail
+  const [detailRes, allRolesRes] = await Promise.all([
+    api('/api/user/role-detail', {uri: usersRolesURI, db, roleName}),
+    api('/api/user/roles', {uri: usersRolesURI, db}),
+  ]);
+  _availableRoles = Array.isArray(allRolesRes) ? allRolesRes.filter(r => r.name !== roleName) : [];
+  _populateRolePicker('inheritRolePicker');
+  if (detailRes && !detailRes.error) {
+    // MongoDB rolesInfo returns:
+    //   detailRes.roles          = direct parent roles [{role, db}]  ← what we edit
+    //   detailRes.inheritedRoles = transitive closure  [{role, db}]  ← read-only expansion
+    _roleInherited = (detailRes.roles || []).map(r => {
+      if (typeof r === 'string') return {role: r, db};
+      return {role: r.role || '', db: r.db || db};
+    });
+    _rolePrivileges = (detailRes.privileges || []).map(p => ({
+      resource: p.resource || {db:'', collection:''},
+      actions: p.actions || [],
+    }));
+  }
+  _privRender(); _inheritRender();
+  document.getElementById('createRoleModal').classList.add('open');
+}
+
+function closeCreateRoleModal() { document.getElementById('createRoleModal').classList.remove('open'); }
+
+async function submitCreateRole() {
+  const name   = document.getElementById('createRoleName').value.trim();
+  const db     = document.getElementById('createRoleDb').value;
+  const isEdit = document.getElementById('createRoleIsEdit').value === '1';
+  if (!name) { toast('Role name required', 'error'); return; }
+  const privileges   = JSON.stringify(_rolePrivileges);
+  const inheritedRoles = JSON.stringify(_roleInherited);
+  let r;
+  if (isEdit) {
+    r = await api('/api/user/update-role', {uri: usersRolesURI, roleName: name, db, privileges, inheritedRoles});
+  } else {
+    r = await api('/api/user/create-role', {uri: usersRolesURI, roleName: name, db, privileges, inheritedRoles});
+  }
+  closeCreateRoleModal();
+  if (r && r.error) return toast(r.error, 'error');
+  toast(r?.message || (isEdit ? 'Role updated' : 'Role created'), 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+
+// ── USER MODAL ─────────────────────────────────────────────────────────────────
+function _userRoleRender() {
+  const el = document.getElementById('userRolesList');
+  const empty = document.getElementById('userRolesEmpty');
+  if (!el) return;
+  const currentDb = document.getElementById('createUserDb')?.value || urSelectedDb;
+  const chips = _userRoles.map((r,i) => {
+    const dbSuffix = (r.db && r.db !== currentDb) ? `<span class="opacity-60">@${esc(r.db)}</span>` : '';
+    return `<span class="mb b-ok" style="font-size:.65rem">${esc(r.role)}${dbSuffix}
+      <button onclick="_userRoleRemove(${i})" class="ml-1 opacity-60 hover:opacity-100">×</button>
+    </span>`;
+  }).join('');
+  el.innerHTML = chips || '';
+  if (empty) empty.style.display = _userRoles.length ? 'none' : '';
+}
+function _userRoleRemove(i) { _userRoles.splice(i,1); _userRoleRender(); }
+function userRoleAdd() {
+  const sel = document.getElementById('userRolePicker');
+  if (!sel || !sel.value) return;
+  const sepIdx = sel.value.lastIndexOf('||');
+  const role = sel.value.substring(0, sepIdx);
+  const db   = sel.value.substring(sepIdx + 2) || document.getElementById('createUserDb')?.value || urSelectedDb;
+  if (_userRoles.find(r => r.role===role && r.db===db)) return;
+  _userRoles.push({role, db});
+  _userRoleRender();
+  sel.value = '';
+}
+
+async function openCreateUserModal(db) {
+  document.getElementById('createUserDb').value = db;
+  document.getElementById('createUserIsEdit').value = '';
+  document.getElementById('createUsername').value = '';
+  document.getElementById('createUsername').readOnly = false;
+  document.getElementById('createUserPass').value = '';
+  document.getElementById('createUserPassRow').style.display = '';
+  document.getElementById('createUserTitle').textContent = '👤 Create User';
+  document.getElementById('createUserSubmitBtn').textContent = 'Create';
+  _userRoles = [];
+  _userRoleRender();
+  const res = await api('/api/user/roles', {uri: usersRolesURI, db});
+  _availableRoles = Array.isArray(res) ? res : [];
+  const sel = document.getElementById('userRolePicker');
+  if (sel) sel.innerHTML = '<option value="">Pick a role…</option>' +
+    _availableRoles.map(r => { const rdb = r.db||''; return `<option value="${esc(r.name+'||'+rdb)}">${esc(r.name)} (${esc(rdb)})</option>`; }).join('');
+  document.getElementById('createUserModal').classList.add('open');
+  document.getElementById('createUsername').focus();
+}
+
+async function editUserRoles(username, db) {
+  document.getElementById('createUserDb').value = db;
+  document.getElementById('createUserIsEdit').value = '1';
+  document.getElementById('createUsername').value = username;
+  document.getElementById('createUsername').readOnly = true;
+  document.getElementById('createUserPass').value = '';
+  document.getElementById('createUserPassRow').style.display = 'none';
+  document.getElementById('createUserTitle').textContent = '✏️ Edit User: ' + username;
+  document.getElementById('createUserSubmitBtn').textContent = 'Save';
+  _userRoles = [];
+  _userRoleRender();
+  // Fetch current user info + available roles
+  const [usersRes, rolesRes] = await Promise.all([
+    api('/api/user/users', {uri: usersRolesURI, db}),
+    api('/api/user/roles', {uri: usersRolesURI, db}),
+  ]);
+  _availableRoles = Array.isArray(rolesRes) ? rolesRes : [];
+  const sel = document.getElementById('userRolePicker');
+  if (sel) sel.innerHTML = '<option value="">Pick a role…</option>' +
+    _availableRoles.map(r => { const rdb = r.db||''; return `<option value="${esc(r.name+'||'+rdb)}">${esc(r.name)} (${esc(rdb)})</option>`; }).join('');
+  // Populate current roles
+  if (Array.isArray(usersRes)) {
+    const user = usersRes.find(u => u.username === username);
+    if (user) {
+      _userRoles = (user.roles || []).map(role => ({role, db}));
+      _userRoleRender();
+    }
+  }
+  document.getElementById('createUserModal').classList.add('open');
+}
+
+function closeCreateUserModal() { document.getElementById('createUserModal').classList.remove('open'); }
+
+async function submitCreateUser() {
+  const username = document.getElementById('createUsername').value.trim();
+  const password = document.getElementById('createUserPass').value;
+  const db       = document.getElementById('createUserDb').value;
+  const isEdit   = document.getElementById('createUserIsEdit').value === '1';
+  if (!username) { toast('Username required', 'error'); return; }
+  if (!isEdit && !password) { toast('Password required', 'error'); return; }
+  const roles = JSON.stringify(_userRoles);
+  let r;
+  if (isEdit) {
+    r = await api('/api/user/set-user-roles', {uri: usersRolesURI, username, db, roles});
+  } else {
+    r = await api('/api/user/create-user', {uri: usersRolesURI, username, password, db, roles});
+  }
+  closeCreateUserModal();
+  if (r && r.error) return toast(r.error, 'error');
+  toast(r?.message || (isEdit ? 'User updated' : 'User created'), 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+
+async function deleteUser(username, db) {
+  if (!confirm(`Delete user "${username}"?`)) return;
+  const r = await api('/api/user/delete-user', {uri: usersRolesURI, username, db});
+  if (r && r.error) return toast(r.error, 'error');
+  toast((r && r.message) || 'User deleted', 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+  
+// ═══════════════════════════════════════════════════════════ OPLOG STATS
+async function oplogStats(){
+  const rsList = rsNodesList().length > 0 ? rsNodesList() : [{uri}];
+  const body = new URLSearchParams({uri});
+  rsList.forEach(n => body.append('rs_uri', n.uri));
+  const r = await fetch('/api/db/oplog-stats',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+  const results = await r.json();
+  if(!Array.isArray(results)) return setMain(errBox((results&&results.error)||'Failed'));
+  const fmtB = b => b > 1024 ? (b/1024).toFixed(1)+' GB' : b+' MB';
+  const lagCls = s => s < 5 ? 'text-mg' : s < 60 ? 'text-yellow-400' : 'text-red-400';
+  const cards = results.map(rs => {
+    if(rs.error) return `<div class="card"><div class="card-header">⚠️ ${esc(rs.uri)}</div><div class="p-4 text-red-400 text-sm mono">${esc(rs.error)}</div></div>`;
+    const usedPct = rs.usedPct || 0;
+    const barCol = usedPct < 60 ? '#00ed64' : usedPct < 85 ? '#d29922' : '#f85149';
+    const memberRows = (rs.members||[]).map(m => `<tr>
+      <td class="mono text-xs">${esc(m.host)}</td>
+      <td><span class="mb b-${m.state==='PRIMARY'?'PRIMARY':'SECONDARY'}">${esc(m.state)}</span></td>
+      <td class="mono text-xs ${lagCls(m.lagSecs)}">${m.state==='PRIMARY'?'—':m.lagSecs.toFixed(1)+'s'}</td>
+    </tr>`).join('');
+    return `<div class="card">
+      <div class="card-header">🔗 ${esc(rs.setName||rs.uri)}</div>
+      <div class="p-4 grid grid-cols-2 gap-5">
+        <div class="space-y-3">
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Oplog Usage</div>
+          <div class="flex items-end gap-3">
+            <div class="text-3xl font-bold ${usedPct>85?'text-red-400':usedPct>60?'text-yellow-400':'text-mg'}">${usedPct.toFixed(1)}%</div>
+            <div class="text-xs text-gray-500 pb-1">${fmtB(rs.usedMB)} / ${fmtB(rs.sizeMB)}</div>
+          </div>
+          <div class="health-track"><div class="health-fill" style="width:${Math.min(100,usedPct)}%;background:${barCol}"></div></div>
+          <div class="text-xs text-gray-500 mt-2">Window: <span class="mono text-gray-300 font-bold">${rs.windowHours?.toFixed(1)||'?'}h</span></div>
+        </div>
+        <div>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Replication Lag</div>
+          <table class="dt"><thead><tr><th>Member</th><th>State</th><th>Lag</th></tr></thead>
+          <tbody>${memberRows}</tbody></table>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  setMain(`<div class="space-y-5">
+    ${pageHeader('🔗','Oplog Stats',`${results.length} replica set(s)`,
+      `<button onclick="nav('oplogStats')" class="btn-sm">↻ Refresh</button>`)}
+    ${cards}
+  </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════ COLLECTION STATS
+let csSelectedDb='';
+// Return the right URI for collection/index queries:
+// sharded → mongos (the top-level connected URI)
+// plain RS → use connected URI (driver picks primary)
+function canonicalDataURI() {
+  return uri; // mongos in sharded, RS URI in plain RS — always correct
+}
+
+async function collStats(){
+  const csTargetURI = canonicalDataURI();
+  const domDb = document.getElementById('csDbSelect')?.value;
+  if(domDb) csSelectedDb = domDb;
+
+  const dbsRes = await api('/api/db/stats', {uri: csTargetURI});
+  if(!Array.isArray(dbsRes)) return setMain(errBox((dbsRes&&dbsRes.error)||'Failed to load databases'));
+  const dbOptions = dbsRes.map(d => `<option value="${esc(d.name)}" ${d.name===csSelectedDb?'selected':''}>${esc(d.name)}</option>`).join('');
+  const isSharded = topology.type === 'sharded';
+
+  const headerActions = `<div class="flex gap-2 flex-wrap items-center">
+    <div class="flex items-center gap-2"><span class="text-xs text-gray-500">Database:</span>
+      <select id="csDbSelect" onchange="csSelectedDb=this.value;collStats()" class="fi text-xs">
+        <option value="">Select database…</option>${dbOptions}
+      </select></div>
+    <button onclick="collStats()" class="btn-sm">↻</button>
+  </div>`;
+
+  if(!csSelectedDb){
+    setMain(`<div class="space-y-5">${pageHeader('📂','Collection Stats','Select database',headerActions)}
+      <div class="text-gray-500 text-sm">Select a database to view collection statistics.</div></div>`);
+    return;
+  }
+  setLoading();
+  const stats = await api('/api/db/coll-stats', {uri: csTargetURI, db: csSelectedDb});
+  if(!stats || stats.error) return setMain(errBox(stats?.error||'Failed'));
+  const colls = Array.isArray(stats) ? stats : [];
+  const totalData = colls.reduce((s,c) => s+c.dataSize, 0)||1;
+  const fmtB = b => { if(b>1e9) return (b/1e9).toFixed(2)+' GB'; if(b>1e6) return (b/1e6).toFixed(1)+' MB'; if(b>1e3) return (b/1e3|0)+' KB'; return b+' B'; };
+  const colors = ['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+
+  const rows = colls.map((c,i) => {
+    const col = colors[i%colors.length];
+    const pct = Math.max(1, Math.round(c.dataSize/totalData*100));
+    return `<tr>
+      <td>
+        <div class="flex items-center gap-2">
+          <div class="db-bar-wrap flex-1" style="min-width:60px"><div class="db-bar" style="width:${pct}%;background:${col}"></div></div>
+          <span class="mono text-sm">${esc(c.name)}</span>
+          ${c.isSharded ? `<span class="mb b-shard" style="font-size:.6rem">sharded${c.shardKey?' · '+esc(c.shardKey):''}</span>` : ''}
+        </div>
+      </td>
+      <td class="mono text-xs">${c.count.toLocaleString()}</td>
+      <td class="mono text-xs">${fmtB(c.dataSize)}</td>
+      <td class="mono text-xs">${fmtB(c.storageSize)}</td>
+      <td class="mono text-xs">${fmtB(c.totalIndexSize)}</td>
+      <td class="mono text-xs">${c.numIndexes}</td>
+      <td class="mono text-xs text-gray-500">${c.avgObjSize > 0 ? fmtB(Math.round(c.avgObjSize)) : '—'}</td>
+      <td>
+        <button onclick="nav('indexMgmt');setTimeout(()=>imPreselect('${esc(csSelectedDb)}','${esc(c.name)}'),600)" class="btn-xs">📋 Indexes</button>
+        ${isSharded && c.isSharded ? `<button onclick="showChunkDist('${esc(csSelectedDb)}','${esc(c.name)}')" class="btn-xs ml-1">🔀 Chunks</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('📂','Collection Stats',`${colls.length} collections in ${csSelectedDb}`,headerActions)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Collections',colls.length,'','')}
+      ${statCard('Total Data',fmtB(colls.reduce((s,c)=>s+c.dataSize,0)),'','text-mg')}
+      ${statCard('Index Size',fmtB(colls.reduce((s,c)=>s+c.totalIndexSize,0)),'','text-blue-400')}
+      ${isSharded?statCard('Sharded',colls.filter(c=>c.isSharded).length,'collections',''):statCard('Indexes',colls.reduce((s,c)=>s+Number(c.numIndexes),0),'total','')}
+    </div>
+    <div class="card">
+      <div class="card-header">📂 Collections</div>
+      <div class="overflow-x-auto"><table class="dt">
+        <thead><tr><th>Collection</th><th>Docs</th><th>Data</th><th>Storage</th><th>Indexes Size</th><th>Indexes</th><th>Avg Doc</th><th></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="8" class="text-center text-gray-600 py-6">No collections</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div id="csChunkDistSection"></div>
+  </div>`);
+}
+function setCsURI(u){void u; collStats();} // no-op: instance fixed to mongos/primary
+
+async function showChunkDist(db, coll){
+  const el = document.getElementById('csChunkDistSection');
+  if(!el) return;
+  el.innerHTML = '<div class="flex items-center gap-2 text-gray-500 p-4"><div class="spinner"></div> Loading chunk distribution…</div>';
+  const ns = db+'.'+coll;
+  const result = await api('/api/db/chunk-distribution', {uri: canonicalDataURI(), ns});
+  if(!result || result.error){ el.innerHTML = errBox(result?.error||'Failed'); return; }
+
+  const colors = ['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c'];
+  const balCol  = result.balanceScore>=0.8?'text-green-400':result.balanceScore>=0.6?'text-yellow-400':'text-red-400';
+  const fmtB = b => { b=Number(b)||0; if(b>=1e9)return(b/1e9).toFixed(2)+' GB'; if(b>=1e6)return(b/1e6).toFixed(1)+' MB'; if(b>=1e3)return(b/1e3|0)+' KB'; return b+' B'; };
+  const fmt  = n => Number(n).toLocaleString();
+
+  // Bar width is driven by data size (most meaningful visual)
+  const maxData = Math.max(...(result.distribution||[]).map(d=>d.dataSize||0), 1);
+
+  const bars = (result.distribution||[]).map((d,i) => {
+    const col     = colors[i%colors.length];
+    const barW    = maxData > 0 ? Math.max(1, Math.round((d.dataSize||0)/maxData*100)) : Math.round(d.dataPct||d.chunkPct);
+    const hasData = d.dataSize > 0;
+    return `<div class="py-2 border-b border-panel-border last:border-0">
+      <div class="flex items-center gap-3">
+        <span class="mono text-gray-300 text-sm w-28 shrink-0">${esc(d.shardId)}</span>
+        <div class="flex-1">
+          <div class="pct-bar-wrap" style="height:8px">
+            <div class="pct-bar" style="width:${barW}%;background:${col};height:8px;border-radius:3px"></div>
+          </div>
+        </div>
+        ${hasData ? `<span class="mono text-xs text-gray-300 w-16 text-right shrink-0">${fmtB(d.dataSize)}</span>
+        <span class="text-gray-500 text-xs w-12 text-right shrink-0">${(d.dataPct||0).toFixed(1)}%</span>` :
+        `<span class="mono text-xs text-gray-500 w-16 text-right shrink-0">—</span>
+        <span class="text-gray-600 text-xs w-12 text-right shrink-0">${(d.chunkPct||0).toFixed(1)}%</span>`}
+      </div>
+      <div class="mt-1 ml-31 text-xs text-gray-500 flex gap-4" style="padding-left:112px">
+        <span>Chunks: <span class="text-gray-300 mono font-semibold">${d.chunkCount}</span> <span class="text-gray-600">(${(d.chunkPct||0).toFixed(1)}%)</span></span>
+        ${d.objects > 0 ? `<span>Docs: <span class="text-gray-300 mono font-semibold">${fmt(d.objects)}</span> <span class="text-gray-600">(${(d.objPct||0).toFixed(1)}%)</span></span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="card">
+    <div class="card-header">🔀 Chunk Distribution — ${esc(ns)}</div>
+    <div class="p-4 space-y-4">
+      <div class="grid grid-cols-3 gap-3">
+        ${statCard('Total Chunks', result.totalChunks, '', '')}
+        ${statCard('Shard Key', result.shardKey||'?', '', 'text-blue-400')}
+        <div class="bg-panel-inner border border-panel-border rounded-lg p-4">
+          <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Balance</div>
+          <div class="text-2xl font-bold ${balCol}">${(result.balanceScore*100).toFixed(0)}%</div>
+        </div>
+      </div>
+      <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Distribution by Data Size</div>
+      <div class="space-y-0">${bars||'<div class="text-gray-600 text-sm">No distribution data</div>'}</div>
+    </div>
+  </div>`;
+  el.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+// ═══════════════════════════════════════════════════════════ INDEX MANAGEMENT
+let imSelectedDb='', imSelectedColl='';
+async function indexMgmt(){
+  const imTargetURI = canonicalDataURI();
+  const domDb   = document.getElementById('imDbSelect')?.value;
+  const domColl = document.getElementById('imCollSelect')?.value;
+  if(domDb)   imSelectedDb   = domDb;
+  if(domColl) imSelectedColl = domColl;
+
+  const dbsRes = await api('/api/db/stats',{uri:imTargetURI});
+  if(!Array.isArray(dbsRes)) return setMain(errBox((dbsRes&&dbsRes.error)||'Failed'));
+  const dbNames = dbsRes.map(d=>d.name);
+  
+  // Reset stale db selection if it no longer exists
+  if(imSelectedDb && !dbNames.includes(imSelectedDb)) {
+    imSelectedDb = '';
+    imSelectedColl = '';
+  }
+  
+  const dbOpts = dbsRes.map(d=>`<option value="${esc(d.name)}" ${d.name===imSelectedDb?'selected':''}>${esc(d.name)}</option>`).join('');
+
+  const headerActions = `<div class="flex gap-2 flex-wrap items-center">
+    <div class="flex items-center gap-2"><span class="text-xs text-gray-500">DB:</span>
+      <select id="imDbSelect" onchange="imSelectedDb=this.value;imSelectedColl='';indexMgmt()" class="fi text-xs">
+        <option value="">DB…</option>${dbOpts}
+      </select></div>
+    <div id="imCollWrap"></div>
+    <button onclick="indexMgmt()" class="btn-sm">↻</button>
+  </div>`;
+
+  if(!imSelectedDb){
+    setMain(`<div class="space-y-5">${pageHeader('📋','Index Management','Select database and collection',headerActions)}
+      <div class="text-gray-500 text-sm">Select a database to continue.</div></div>`);
+    return;
+  }
+
+  // Load collections for selected DB
+  const collsRes = await api('/api/db/coll-stats',{uri:imTargetURI,db:imSelectedDb});
+  const colls = Array.isArray(collsRes) ? collsRes.map(c=>c.name) : [];
+  
+  // Validate stored collection — reset if it no longer exists in this DB
+  if(imSelectedColl && !colls.includes(imSelectedColl)) {
+    imSelectedColl = '';
+  }
+  
+  const collOpts = colls.map(n=>`<option value="${esc(n)}" ${n===imSelectedColl?'selected':''}>${esc(n)}</option>`).join('');
+
+  setLoading();
+
+  const rebuildHeader = `<div class="flex gap-2 flex-wrap items-center">
+    <div class="flex items-center gap-2"><span class="text-xs text-gray-500">DB:</span>
+      <select id="imDbSelect" onchange="imSelectedDb=this.value;imSelectedColl='';indexMgmt()" class="fi text-xs">
+        <option value="">DB…</option>${dbOpts}
+      </select></div>
+    <div class="flex items-center gap-2"><span class="text-xs text-gray-500">Collection:</span>
+      <select id="imCollSelect" onchange="imSelectedColl=this.value;indexMgmt()" class="fi text-xs">
+        <option value="">Collection…</option>${collOpts}
+      </select></div>
+    <button onclick="indexMgmt()" class="btn-sm">↻</button>
+  </div>`;
+
+  if(!imSelectedColl){
+    setMain(`<div class="space-y-5">${pageHeader('📋','Index Management',`${colls.length} collections`,rebuildHeader)}
+      <div class="text-gray-500 text-sm">Select a collection to view its indexes.</div></div>`);
+    return;
+  }
+
+  const indexes = await api('/api/db/indexes',{uri:imTargetURI,db:imSelectedDb,collection:imSelectedColl});
+  if(!indexes || indexes.error) return setMain(errBox(indexes?.error||'Failed'));
+  const idxList = Array.isArray(indexes) ? indexes : [];
+  const fmtB = b => b>1e6?(b/1e6).toFixed(1)+' MB':b>1e3?(b/1e3|0)+' KB':b+'B';
+
+  const rows = idxList.map(idx => {
+    const keys = Object.entries(idx.keys||{}).map(([k,v])=>`<span class="mono text-xs px-1 py-0.5 rounded bg-panel">${esc(k)}: ${v}</span>`).join(' ');
+    const tags = [
+      idx.name==='_id_' ? '<span class="mb b-PRIMARY" style="font-size:.6rem">primary</span>' : '',
+      idx.unique  ? '<span class="mb b-SECONDARY" style="font-size:.6rem">unique</span>' : '',
+      idx.sparse  ? '<span class="mb b-HIDDEN" style="font-size:.6rem">sparse</span>' : '',
+      idx.hidden  ? '<span class="mb b-DOWN" style="font-size:.6rem">hidden</span>' : '',
+      idx.partial ? '<span class="mb b-warn" style="font-size:.6rem">partial</span>' : '',
+      idx.ttl>=0  ? `<span class="mb b-warn" style="font-size:.6rem">TTL ${idx.ttl}s</span>` : '',
+    ].filter(Boolean).join(' ');
+    const accCls = idx.accesses===0 ? 'text-red-400' : idx.accesses < 10 ? 'text-yellow-400' : 'text-mg';
+    return `<tr>
+      <td class="mono text-sm">${esc(idx.name)}</td>
+      <td class="text-xs">${keys}</td>
+      <td class="text-xs">${tags}</td>
+      <td class="mono text-xs ${accCls}" title="Since ${esc(idx.since||'?')}">${idx.accesses?.toLocaleString()||'0'}</td>
+      <td class="mono text-xs">${idx.sizeBytes > 0 ? fmtB(idx.sizeBytes) : '—'}</td>
+      <td>${idx.name==='_id_' || idx.shardKeyIdx
+        ? `<span class="text-xs text-gray-600" title="${idx.shardKeyIdx?'Sole index covering shard key — cannot drop':'Primary key'}">${idx.shardKeyIdx?'🔒 shard key':'🔒 primary'}</span>`
+        : `<button onclick="dropIndex('${esc(idx.name)}')" class="btn-xs" style="color:#f87171;border-color:#7f1d1d">🗑 Drop</button>`}</td>
+    </tr>`;
+  }).join('');
+
+  const zeroUse = idxList.filter(i=>i.name!=='_id_'&&i.accesses===0).length;
+  setMain(`<div class="space-y-5">
+    ${pageHeader('📋','Index Management',`${imSelectedDb}.${imSelectedColl} · ${idxList.length} indexes`,rebuildHeader)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Indexes',idxList.length,'','')}
+      ${statCard('Zero Use',zeroUse,'since last restart',zeroUse>0?'text-red-400':'text-mg')}
+      ${statCard('Total Size',fmtB(idxList.reduce((s,i)=>s+(i.sizeBytes||0),0)),'','text-blue-400')}
+      ${statCard('Unique',idxList.filter(i=>i.unique).length,'','')}
+    </div>
+    ${zeroUse>0?`<div class="bg-yellow-900/20 border border-yellow-800 rounded p-3 text-xs text-yellow-300">⚠️ ${zeroUse} index(es) with zero accesses since last restart — candidates for removal.</div>`:''}
+    <div class="card">
+      <div class="card-header">📋 Indexes</div>
+      <div class="overflow-x-auto"><table class="dt">
+        <thead><tr><th>Name</th><th>Keys</th><th>Properties</th><th>Accesses ↑</th><th>Size</th><th></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="6" class="text-center text-gray-600 py-6">No indexes</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>`);
+}
+function setImURI(u){void u; indexMgmt();} // no-op: instance fixed to mongos/primary
+function imPreselect(db,coll){imSelectedDb=db;imSelectedColl=coll;indexMgmt();}
+async function dropIndex(name){
+  if(!confirm(`Drop index "${name}" on ${imSelectedDb}.${imSelectedColl}?`)) return;
+  const r = await api('/api/db/drop-index',{uri:canonicalDataURI(),db:imSelectedDb,collection:imSelectedColl,name});
+  if(r&&r.error) return toast(r.error,'error');
+  toast(r?.message||'Index dropped','success');
+  setTimeout(()=>indexMgmt(),600);
+}
+
+// ═══════════════════════════════════════════════════════════ SLOW QUERIES
+let sqTargetURI='', sqSelectedDb='';
+let sqSortCol='millis', sqSortDir='desc', sqCurrentList=[];
+async function slowQueries(targetURI){
+  if(targetURI) sqTargetURI = targetURI;
+  if(!sqTargetURI) {
+    const first = rsNodesList()[0]||memberNodes.find(m=>m.role==='primary')||{uri};
+    sqTargetURI = injectCredsIntoUri(first.uri||uri);
+  }
+  const domDb = document.getElementById('sqDbSelect')?.value;
+  if(domDb) sqSelectedDb = domDb;
+
+  const instanceSel = instanceSelect(sqTargetURI,'setSqURI');
+  const minHeaderActions = `<div class="flex gap-2 flex-wrap items-center">${instanceSel}<button onclick="slowQueries()" class="btn-sm">↻</button></div>`;
+  const dbsRes = await api('/api/db/stats',{uri:sqTargetURI});
+  if(!Array.isArray(dbsRes)) return setMainWithError('🐢','Slow Queries',minHeaderActions,(dbsRes&&dbsRes.error)||'Failed to load databases',sqTargetURI);
+  const dbOpts = dbsRes.map(d=>`<option value="${esc(d.name)}" ${d.name===sqSelectedDb?'selected':''}>${esc(d.name)}</option>`).join('');
+
+  // Fetch profiling level for selected db
+  let profLevel=0, slowMs=100;
+  if(sqSelectedDb){
+    const pl = await api('/api/db/profiler-level',{uri:sqTargetURI,db:sqSelectedDb});
+    if(pl&&!pl.error){ profLevel=pl.was??pl.level??0; slowMs=pl.slowms??100; }
+  }
+  const levelCls = [,'text-yellow-400','text-mg'];
+  const levelLabel = ['Off','Slow ops only','All ops'];
+
+  const headerActions = `<div class="flex gap-2 flex-wrap items-center">
+    ${instanceSel}
+    <div class="flex items-center gap-2"><span class="text-xs text-gray-500">DB:</span>
+      <select id="sqDbSelect" onchange="sqSelectedDb=this.value;slowQueries()" class="fi text-xs">
+        <option value="">Select DB…</option>${dbOpts}
+      </select></div>
+    <button onclick="slowQueries()" class="btn-sm">↻</button>
+  </div>`;
+
+  if(!sqSelectedDb){
+    setMain(`<div class="space-y-5">${pageHeader('🐢','Slow Queries','Select instance and database',headerActions)}
+      <div class="text-gray-500 text-sm">Select a database to view profiler data.</div></div>`);
+    return;
+  }
+  // Read filter values BEFORE setLoading() wipes the DOM
+  const nsFilter  = document.getElementById('sqNsFilter')?.value||'';
+  const opFilter2 = document.getElementById('sqOpFilter')?.value||'';
+  const minMs2    = document.getElementById('sqMinMs')?.value||'0';
+
+  setLoading();
+
+  const entries = await api('/api/db/profiler-entries',{uri:sqTargetURI,db:sqSelectedDb,ns:nsFilter,op:opFilter2,minMs:minMs2,limit:'100'});
+  const list = Array.isArray(entries) ? entries : [];
+
+  sqCurrentList = list;
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('🐢','Slow Queries',`${sqSelectedDb} · ${list.length} entries`,headerActions)}
+    <div class="card">
+      <div class="card-header">⚙️ Profiler Settings
+        <div class="flex items-center gap-3 ml-auto">
+          <span class="text-xs ${levelCls[profLevel]||'text-gray-400'}">Level ${profLevel}: ${levelLabel[profLevel]||'Unknown'}</span>
+          <span class="text-xs text-gray-500">slowMs: <span class="mono text-gray-300">${slowMs}</span></span>
+        </div>
+      </div>
+      <div class="p-4 flex flex-wrap gap-3 items-end">
+        <div><label class="text-xs text-gray-500 block mb-1">Level</label>
+          <select id="profLevelSel" class="fi text-xs">
+            <option value="0" ${profLevel===0?'selected':''}>0 — Off</option>
+            <option value="1" ${profLevel===1?'selected':''}>1 — Slow ops only</option>
+            <option value="2" ${profLevel===2?'selected':''}>2 — All ops</option>
+          </select></div>
+        <div><label class="text-xs text-gray-500 block mb-1">slowMs threshold</label>
+          <input id="profSlowMs" type="number" min="0" value="${slowMs}" class="fi w-24 text-xs"></div>
+        <button onclick="applyProfiler()" class="btn-sm">Apply</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">🔍 Filter
+        <div class="flex gap-2 ml-auto flex-wrap">
+          <input id="sqNsFilter" placeholder="namespace contains…" value="${esc(nsFilter)}" class="fi text-xs w-44">
+          <select id="sqOpFilter" class="fi text-xs">
+            <option value="">Any op</option>
+            ${['query','command','getmore','insert','update','remove'].map(o=>`<option value="${o}" ${o===opFilter2?'selected':''}>${o}</option>`).join('')}
+          </select>
+          <div class="flex items-center gap-1"><span class="text-xs text-gray-500">min ms:</span>
+            <input id="sqMinMs" type="number" min="0" value="${esc(minMs2)}" class="fi text-xs w-16"></div>
+          <button onclick="slowQueries()" class="btn-sm">Apply</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📋 Entries <span class="text-gray-600 font-normal text-xs ml-1">click column headers to sort · click row to expand</span></div>
+      <div id="sqTableWrap">${buildSqTable()}</div>
+    </div>
+  </div>`);
+}
+function setSqURI(u){sqTargetURI=u;slowQueries();}
+
+function buildSqTable(){
+  const secsCls2 = ms => ms<100?'op-fast':ms<1000?'op-mid':'op-slow';
+  const cols = [
+    {key:'ts',           label:'Timestamp', num:false},
+    {key:'op',           label:'Op',        num:false},
+    {key:'ns',           label:'Namespace', num:false},
+    {key:'millis',       label:'Exec Time', num:true },
+    {key:'planSummary',  label:'Plan',      num:false},
+    {key:'keysExamined', label:'Keys Exam', num:true },
+    {key:'docsExamined', label:'Docs Exam', num:true },
+    {key:'nreturned',    label:'Returned',  num:true },
+  ];
+  const thStyle = 'cursor-pointer select-none hover:text-gray-200 whitespace-nowrap';
+  const arrow = (key) => sqSortCol===key ? (sqSortDir==='desc'?' ↓':' ↑') : '';
+  const headers = cols.map(c=>
+    `<th class="${thStyle}" onclick="sqSort('${c.key}')">${c.label}${arrow(c.key)}</th>`
+  ).join('') + '<th></th>';
+
+  const sorted = [...sqCurrentList].sort((a,b)=>{
+    let av = a[sqSortCol], bv = b[sqSortCol];
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    let cmp = (typeof av==='number' && typeof bv==='number')
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return sqSortDir==='desc' ? -cmp : cmp;
+  });
+
+  const rows = sorted.map((e,i)=>{
+    const id  = 'sq-'+i;
+    const ns  = e.ns||'';
+    const op  = e.op||'';
+    const ms  = e.millis||0;
+    const ts  = e.ts||'';
+    const plan= e.planSummary||'';
+    const keysExam = e.keysExamined??'--';
+    const docsExam = e.docsExamined??'--';
+    const docsRet  = e.nreturned??'--';
+    const cmd = JSON.stringify(e.command||e.query||{},null,2);
+    return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="toggleDetail('${id}')">
+      <td class="mono text-xs text-gray-500">${esc(ts.slice(0,19).replace('T',' '))}</td>
+      <td><span class="mb b-SECONDARY text-xs">${esc(op)}</span></td>
+      <td class="mono text-xs">${esc(ns)}</td>
+      <td><span class="mb ${secsCls2(ms)} mono">${ms}ms</span></td>
+      <td class="mono text-xs text-gray-500">${esc(plan)}</td>
+      <td class="mono text-xs">${keysExam}</td>
+      <td class="mono text-xs">${docsExam}</td>
+      <td class="mono text-xs">${docsRet}</td>
+      <td class="text-gray-600 text-xs">▼</td>
+    </tr>
+    <tr id="${id}" class="op-detail"><td colspan="9" class="p-0 bg-panel-inner">
+      <div class="p-4"><div class="text-xs font-bold text-gray-500 uppercase mb-2">Command</div>
+        <pre class="text-xs mono text-gray-300 bg-panel rounded p-3 overflow-auto max-h-52 whitespace-pre-wrap">${esc(cmd)}</pre>
+      </div>
+    </td></tr>`;
+  }).join('');
+
+  return `<table class="dt">
+    <thead><tr>${headers}</tr></thead>
+    <tbody>${rows||'<tr><td colspan="9" class="text-center text-gray-600 py-8">No entries — profiler may be off or no slow queries recorded</td></tr>'}</tbody>
+  </table>`;
+}
+
+function sqSort(col){
+  if(sqSortCol===col) sqSortDir = sqSortDir==='desc'?'asc':'desc';
+  else { sqSortCol=col; sqSortDir='desc'; }
+  const wrap = document.getElementById('sqTableWrap');
+  if(wrap) wrap.innerHTML = buildSqTable();
+}
+async function applyProfiler(){
+  const level = document.getElementById('profLevelSel')?.value;
+  const slowMs = document.getElementById('profSlowMs')?.value;
+  const r = await api('/api/db/profiler-level-set',{uri:sqTargetURI,db:sqSelectedDb,level,slowMs});
+  if(r&&r.error) return toast(r.error,'error');
+  toast(`Profiler set to level ${level}, slowMs=${slowMs}`,'success');
+  setTimeout(()=>slowQueries(),600);
+}
+
+// ═══════════════════════════════════════════════════════════ LOG VIEWER
+let lgTargetURI='', lgFilter='', lgLevel='';
+async function logViewer(targetURI){
+  if(targetURI) lgTargetURI = targetURI;
+  if(!lgTargetURI) lgTargetURI = uri;
+  const instanceSel = instanceSelect(lgTargetURI,'setLgURI');
+  const domFilter = document.getElementById('lgFilter')?.value??'';
+  const domLevel  = document.getElementById('lgLevel')?.value??'';
+  if(domFilter!==undefined) lgFilter = domFilter;
+  if(domLevel!==undefined)  lgLevel  = domLevel;
+  const headerActions=`<div class="flex gap-2 flex-wrap items-center">
+    ${instanceSel}
+    <select id="lgLevel" onchange="logViewer()" class="fi text-xs">
+      <option value="">All severities</option>
+      ${['I','W','E','F'].map(s=>`<option value="${s}" ${s===lgLevel?'selected':''}>${s}</option>`).join('')}
+    </select>
+    <input id="lgFilter" placeholder="Filter…" value="${esc(lgFilter)}" class="fi text-xs w-40" onchange="logViewer()">
+    <button onclick="logViewer()" class="btn-sm">↻</button>
+  </div>`;
+
+  setLoading();
+  const res = await api('/api/db/log',{uri:lgTargetURI,kind:'global'});
+  if(!res||res.error) return setMainWithError('📜','Log Viewer',headerActions,res?.error||'Failed',lgTargetURI);
+  const lines = (res.log||[]);
+  const total = lines.length;
+
+  // Parse structured log lines (MongoDB 4.4+ JSON format) or plain text
+  const parsed = lines.map(line => {
+    try {
+      const j = JSON.parse(line);
+      return {t: j.t?.$date||'', s: j.s||'', c: j.c||'', ctx: j.ctx||'', msg: j.msg||line, attr: j.attr, raw: line};
+    } catch(_) {
+      // Legacy plain text: "2024-01-01T00:00:00.000+0000 W REPL [repl] message"
+      const m = line.match(/^(\S+)\s+([DIWEFSUW])\s+(\S+)\s+\[([^\]]+)\]\s+(.+)$/);
+      if(m) return {t: m[1], s: m[2], c: m[3], ctx: m[4], msg: m[5], raw: line};
+      return {t:'', s:'', c:'', ctx:'', msg: line, raw: line};
+    }
+  });
+
+  const sevCls = {W:'text-yellow-400',E:'text-red-400',F:'text-red-500',I:'text-gray-400',D:'text-gray-600',D1:'text-gray-600',D2:'text-gray-600',D3:'text-gray-600',D4:'text-gray-600',D5:'text-gray-600'};
+  const filtered = parsed.filter(l => {
+    if(lgLevel && l.s !== lgLevel) return false;
+    if(lgFilter && !l.raw.toLowerCase().includes(lgFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  // Store display-ordered lines for lgToggle access (newest first, capped at 500)
+  _lgParsed = filtered.slice(-500).reverse();
+
+  const rows = _lgParsed.map((l, rowIdx) => {
+    const cls = sevCls[l.s]||'text-gray-500';
+    const time = l.t ? l.t.slice(0,19).replace('T',' ') : '';
+    // hasDetail: anything with an attr object, or a rich message worth expanding
+    const hasDetail = l.attr != null || l.raw.length > 120;
+    const expandHint = hasDetail
+      ? `<span class="lg-chevron" style="color:#6e7681;font-size:.6rem;margin-left:4px;display:inline-block;transition:transform .15s;vertical-align:middle">▶</span>`
+      : '';
+    return `<tr data-lgi="${rowIdx}" onclick="lgToggle(this,${rowIdx})"
+        style="cursor:pointer"
+        class="lg-row hover:bg-panel-hover transition-colors">
+      <td class="mono text-xs text-gray-600 shrink-0 whitespace-nowrap">${esc(time)}</td>
+      <td class="mono text-xs font-bold ${cls}">${esc(l.s)}</td>
+      <td class="mono text-xs text-blue-400">${esc(l.c)}</td>
+      <td class="mono text-xs text-gray-500">[${esc(l.ctx)}]</td>
+      <td class="mono text-xs text-gray-300 break-all">${esc(l.msg)}${expandHint}</td>
+    </tr>`;
+  }).join('');
+
+  const warnCount = parsed.filter(l=>l.s==='W').length;
+  const errCount  = parsed.filter(l=>l.s==='E'||l.s==='F').length;
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('📜','Log Viewer',`${total} lines · ${filtered.length} shown`, headerActions)}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Total Lines',total,'','')}
+      ${statCard('Warnings',warnCount,'',warnCount>0?'text-yellow-400':'text-mg')}
+      ${statCard('Errors',errCount,'',errCount>0?'text-red-400':'text-mg')}
+      ${statCard('Shown',filtered.length,'','')}
+    </div>
+    <div class="card">
+      <div class="card-header">📜 Log Lines
+        <span class="text-gray-600 font-normal text-xs ml-1">newest first · last 500 of filtered</span>
+        <span class="text-gray-600 font-normal text-xs ml-3">· click any row to expand</span>
+      </div>
+      <div class="overflow-x-auto max-h-[640px] overflow-y-auto">
+        <table class="dt" style="table-layout:auto">
+          <thead><tr><th>Time</th><th>S</th><th>Component</th><th>Context</th><th>Message</th></tr></thead>
+          <tbody>${rows||'<tr><td colspan="5" class="text-center text-gray-600 py-8">No matching log lines</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>`);
+}
+
+// Toggle the jq-style detail pane for a log row.
+// On first click: inserts a new detail <tr> immediately after the clicked row and
+// renders the full log entry as an interactive JSON tree (using the existing jtNode
+// renderer). On subsequent clicks: shows/hides the already-built pane — so the
+// tree state (expanded nodes) is preserved across toggles.
+function lgToggle(tr, idx) {
+  const l = _lgParsed[idx];
+  if (!l) return;
+
+  // Check whether a detail row already exists right after this one
+  const next = tr.nextElementSibling;
+  const isDetailRow = next && next.dataset.lgDetail !== undefined;
+
+  if (isDetailRow) {
+    // Toggle visibility of the existing pane
+    const open = next.style.display !== 'none';
+    next.style.display = open ? 'none' : '';
+    tr.classList.toggle('lg-row-open', !open);
+    // Rotate the chevron
+    const chev = tr.querySelector('.lg-chevron');
+    if (chev) chev.style.transform = open ? '' : 'rotate(90deg)';
+    return;
+  }
+
+  // ── Build detail object: reconstruct the full log entry as a plain JS object ──
+  // so jtNode can render it with syntax colouring + expand/collapse.
+  const obj = {};
+  if (l.t) obj.timestamp = l.t;
+  if (l.s) obj.severity  = l.s;
+  if (l.c) obj.component = l.c;
+  if (l.ctx) obj.context = l.ctx;
+  obj.msg = l.msg;
+  if (l.attr !== null && l.attr !== undefined) {
+    obj.attr = l.attr; // already a parsed JS value (from JSON.parse of the log line)
+  }
+
+  // ── Create detail row ────────────────────────────────────────────────────────
+  const detailTr = document.createElement('tr');
+  detailTr.dataset.lgDetail = String(idx);
+  detailTr.style.cssText = 'background:#0a0f16;';
+
+  const td = document.createElement('td');
+  td.colSpan = 5;
+  td.style.cssText = 'padding:0;border-bottom:1px solid #21262d;';
+
+  const pane = document.createElement('div');
+  pane.style.cssText = [
+    'padding:10px 16px 12px 18px',
+    'border-left:3px solid #00ed64',
+    'background:#0a0f16',
+    'font-family:"JetBrains Mono",monospace',
+    'font-size:.75rem',
+    'line-height:1.7',
+  ].join(';');
+
+  // Render using the existing interactive JSON tree.
+  // depth=2 means top-level keys and `attr` are expanded by default;
+  // deeper nesting starts collapsed (click to expand — standard jq UX).
+  pane.appendChild(jtNode(obj, null, 0, 2));
+
+  td.appendChild(pane);
+  detailTr.appendChild(td);
+  tr.after(detailTr);
+
+  // Mark the source row as open
+  tr.classList.add('lg-row-open');
+  const chev = tr.querySelector('.lg-chevron');
+  if (chev) chev.style.transform = 'rotate(90deg)';
+}
+function setLgURI(u){lgTargetURI=u;logViewer();}
+
+// ═══════════════════════════════════════════════════════════ WIREDTIGER STATS
+let wtTargetURI='';
+async function wiredTiger(targetURI){
+  if(targetURI) wtTargetURI = targetURI;
+  if(!wtTargetURI) wtTargetURI = uri;
+  const instanceSel = instanceSelect(wtTargetURI,'setWtURI');
+  const headerActions=`<div class="flex gap-2">${instanceSel}<button onclick="wiredTiger()" class="btn-sm">↻</button></div>`;
+  setLoading();
+  const res = await api('/api/db/wiredtiger',{uri:wtTargetURI});
+  if(!res||res.error) return setMainWithError('⚙️','WiredTiger Stats',headerActions,res?.error||'Failed',wtTargetURI);
+
+  const wt   = res.wiredTiger||{};
+  const cache= wt.cache||{};
+  const mem  = res.mem||{};
+
+  const fmtB = b => { b=Number(b)||0; if(b>1e9)return(b/1e9).toFixed(2)+' GB'; if(b>1e6)return(b/1e6).toFixed(1)+' MB'; return Math.round(b/1024)+' KB'; };
+  const pct  = (a,b) => b>0 ? (Number(a)/Number(b)*100).toFixed(1)+'%' : '—';
+
+  const cacheMax   = Number(cache['maximum bytes configured'])||1;
+  const cacheUsed  = Number(cache['bytes currently in the cache'])||0;
+  const cacheDirty = Number(cache['tracked dirty bytes in the cache'])||0;
+  const cacheUsedPct  = cacheUsed/cacheMax*100;
+  const cacheDirtyPct = cacheDirty/cacheMax*100;
+  const cacheCol = cacheUsedPct>90?'#f85149':cacheUsedPct>75?'#d29922':'#00ed64';
+  const dirtyCol = cacheDirtyPct>20?'#f85149':cacheDirtyPct>10?'#d29922':'#58a6ff';
+
+  const evictPagesUser = Number(cache['pages evicted by application threads']||0);
+  const evictPagesBg   = Number(cache['pages evicted in background']??cache['eviction worker thread evicting pages']??0);
+  const readTickets    = Number((wt.concurrentTransactions?.read)||{})?.available??'—';
+  const writeTickets   = Number((wt.concurrentTransactions?.write)||{})?.available??'—';
+  const concRead  = toValue(wt,'concurrentTransactions.read.available');
+  const concWrite = toValue(wt,'concurrentTransactions.write.available');
+  const concReadOut  = toValue(wt,'concurrentTransactions.read.out');
+  const concWriteOut = toValue(wt,'concurrentTransactions.write.out');
+
+  function toValue(obj, path){
+    return path.split('.').reduce((o,k)=>o&&typeof o==='object'?o[k]:undefined, obj)??'—';
+  }
+
+  const chkptTime   = Number(toValue(wt,'transaction.transaction checkpoint most recent time (msecs)'))||0;
+  const chkptTotal  = Number(toValue(wt,'transaction.transaction checkpoints'))||0;
+
+  const metric = (label, value, cls='') =>
+    `<div class="bg-panel-inner border border-panel-border rounded p-3">
+      <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">${label}</div>
+      <div class="text-lg font-bold mono ${cls}">${value}</div>
+    </div>`;
+
+  // ── Compression stats from wt block-manager + cache ────────────────────────
+  const wtBm       = wt['block-manager'] || {};
+  const wtSession  = wt.session || {};
+  const bmBytesRead    = Number(wtBm['bytes read']||0);
+  const bmBytesWritten = Number(wtBm['bytes written']||0);
+  const cacheReadIn    = Number(cache['bytes read into cache']||0);
+  const cacheWriteOut  = Number(cache['bytes written from cache']||0);
+  const readRatio  = bmBytesRead    > 0 ? (cacheReadIn    / bmBytesRead).toFixed(2)    : null;
+  const writeRatio = bmBytesWritten > 0 ? (cacheWriteOut  / bmBytesWritten).toFixed(2) : null;
+
+  const comprBar = (label, ratio, uncomp, comp) => {
+    if (!ratio) return '';
+    const pct = Math.min(100, Math.round(100/Number(ratio)));
+    const col = pct < 40 ? '#00ed64' : pct < 70 ? '#d29922' : '#f85149';
+    return `<div class="space-y-1">
+      <div class="flex justify-between text-xs">
+        <span class="text-gray-500">${label}</span>
+        <span class="mono text-gray-300 font-semibold">${ratio}× <span class="text-gray-600 font-normal">(${pct}% on disk)</span></span>
+      </div>
+      <div class="rounded overflow-hidden h-4 flex" style="background:#21262d" title="compressed ${fmtB(comp)} → ${fmtB(uncomp)} uncompressed">
+        <div style="width:${pct}%;background:${col};border-radius:3px 0 0 3px"></div>
+        <div style="flex:1;background:#21262d"></div>
+      </div>
+      <div class="flex justify-between text-xs text-gray-600">
+        <span>compressed <span class="mono text-gray-400">${fmtB(comp)}</span></span>
+        <span>uncompressed <span class="mono text-gray-400">${fmtB(uncomp)}</span></span>
+      </div>
+    </div>`;
+  };
+
+  const compressionCard = (bmBytesRead > 0 || bmBytesWritten > 0) ? `<div class="card">
+    <div class="card-header">🗜 Compression</div>
+    <div class="p-4 space-y-5">
+      <div class="grid grid-cols-3 gap-3">
+        ${metric('Read ratio',  readRatio  ? readRatio+'×'  : '—', 'text-mg')}
+        ${metric('Write ratio', writeRatio ? writeRatio+'×' : '—', 'text-blue-400')}
+        ${metric('Pages skipped', Number(wtSession['page written was empty']||0).toLocaleString())}
+      </div>
+      <div class="space-y-4">
+        ${comprBar('Read (disk→cache)',  readRatio,  cacheReadIn,  bmBytesRead)}
+        ${comprBar('Write (cache→disk)', writeRatio, cacheWriteOut, bmBytesWritten)}
+      </div>
+      <div class="text-xs text-gray-600 border-t border-panel-border pt-3">
+        <span class="text-gray-500 font-semibold">Block manager totals · </span>
+        Read: <span class="mono text-gray-400">${fmtB(bmBytesRead)}</span> ·
+        Written: <span class="mono text-gray-400">${fmtB(bmBytesWritten)}</span> ·
+        Checkpoint: <span class="mono text-gray-400">${fmtB(Number(wtBm['bytes written for checkpoint']||0))}</span>
+      </div>
+    </div>
+  </div>` : '';
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('⚙️','WiredTiger Stats',
+      `${esc(res.host||'')} · v${esc(res.version||'')} · ${esc(res.process||'')}`,
+      `<div class="flex gap-2">${instanceSel}<button onclick="wiredTiger()" class="btn-sm">↻</button></div>`)}
+
+    <div class="card">
+      <div class="card-header">🗂 Cache</div>
+      <div class="p-4 space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="space-y-2">
+            <div class="flex justify-between text-xs"><span class="text-gray-500">Used</span><span class="mono">${fmtB(cacheUsed)} / ${fmtB(cacheMax)}</span></div>
+            <div class="health-track"><div class="health-fill" style="width:${Math.min(100,cacheUsedPct)}%;background:${cacheCol}"></div></div>
+            <div class="flex justify-between text-xs"><span class="text-gray-500">Dirty</span><span class="mono text-blue-400">${fmtB(cacheDirty)} (${cacheDirtyPct.toFixed(1)}%)</span></div>
+            <div class="health-track"><div class="health-fill" style="width:${Math.min(100,cacheDirtyPct*5)}%;background:${dirtyCol}"></div></div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            ${metric('Cache used %', cacheUsedPct.toFixed(1)+'%', cacheUsedPct>85?'text-red-400':cacheUsedPct>70?'text-yellow-400':'text-mg')}
+            ${metric('Dirty %', cacheDirtyPct.toFixed(1)+'%', cacheDirtyPct>20?'text-red-400':cacheDirtyPct>10?'text-yellow-400':'text-blue-400')}
+            ${metric('Pages evicted (user)', evictPagesUser.toLocaleString(), evictPagesUser>1000?'text-yellow-400':'')}
+            ${metric('Pages evicted (bg)', evictPagesBg.toLocaleString())}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">🎟 Tickets (Concurrency)</div>
+      <div class="p-4 grid grid-cols-4 gap-3">
+        ${metric('Read available', toValue(wt,'concurrentTransactions.read.available'))}
+        ${metric('Read in use',    toValue(wt,'concurrentTransactions.read.out'), Number(toValue(wt,'concurrentTransactions.read.out'))>100?'text-yellow-400':'')}
+        ${metric('Write available',toValue(wt,'concurrentTransactions.write.available'))}
+        ${metric('Write in use',   toValue(wt,'concurrentTransactions.write.out'), Number(toValue(wt,'concurrentTransactions.write.out'))>50?'text-yellow-400':'')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">⏱ Checkpoints</div>
+      <div class="p-4 grid grid-cols-4 gap-3">
+        ${metric('Total checkpoints', chkptTotal.toLocaleString())}
+        ${metric('Last checkpoint ms', chkptTime.toLocaleString(), chkptTime>60000?'text-red-400':chkptTime>10000?'text-yellow-400':'')}
+        ${metric('Resident mem', (mem.resident||0)+' MB')}
+        ${metric('Virtual mem',  (mem.virtual||0)+' MB')}
+      </div>
+    </div>
+
+    ${compressionCard}
+
+    ${jsonCard('wtRaw', wt, 1, 'serverStatus().wiredTiger')}
+  </div>`);
+}
+function setWtURI(u){wtTargetURI=u;wiredTiger();}
+
+// ═══════════════════════════════════════════════════════════ JSON TREE
+const _jtCache={};
+function buildJT(id,data,depth){
+  _jtCache[id]=data;
+  const el=document.getElementById(id); if(!el) return;
+  el.innerHTML=''; el.appendChild(jtNode(data,null,0,depth));
+}
+
+// label = original query string shown in the card header
+function jsonCard(id,data,expandDepth=1,label=''){
+  setTimeout(()=>buildJT(id,data,expandDepth),0);
+  return `<div class="card">
+    <div class="flex items-center gap-3 px-4 py-2.5 border-b border-panel-border bg-panel-inner flex-wrap">
+      <span class="text-xs font-bold text-gray-400">Raw JSON</span>
+      ${label?`<code class="text-gray-600 text-xs mono ml-1">${esc(label)}</code>`:''}
+      <input type="text" placeholder="Search…" oninput="jtSearch('${id}',this.value)"
+        class="ml-auto bg-panel border border-panel-border rounded px-2 py-1 text-xs mono text-gray-300 outline-none focus:border-mg w-36">
+      <button onclick="jtExpandAll('${id}')"   class="btn-xs">Expand All</button>
+      <button onclick="jtCollapseAll('${id}')" class="btn-xs">Collapse All</button>
+    </div>
+    <div class="p-4 max-h-[480px] overflow-y-auto mono text-xs leading-6" id="${id}"></div>
+  </div>`;
+}
+
+function jtNode(value,key,depth,ed){
+  const w=document.createElement('div');
+  const ks=key!==null?Object.assign(document.createElement('span'),{className:'jt-key',textContent:String(key)+': '}):null;
+  if(value===null){if(ks)w.appendChild(ks);w.appendChild(Object.assign(document.createElement('span'),{className:'jt-null',textContent:'null'}));w.appendChild(muted(','));return w;}
+  if(Array.isArray(value)||(typeof value==='object')) return jtColl(w,value,key,depth,ed,Array.isArray(value));
+  if(ks)w.appendChild(ks);
+  let cls,text;
+  if(typeof value==='string'){cls='jt-str';text=`"${value}"`;}
+  else if(typeof value==='number'){cls='jt-num';text=String(value);}
+  else if(typeof value==='boolean'){cls='jt-bool';text=String(value);}
+  else{cls='';text=String(value);}
+  w.appendChild(Object.assign(document.createElement('span'),{className:cls,textContent:text}));
+  w.appendChild(muted(','));return w;
+}
+function jtColl(w,value,key,depth,ed,isArr){
+  const entries=isArr?value.map((v,i)=>[i,v]):Object.entries(value);
+  const count=entries.length,open=depth<ed,ob=isArr?'[':'{',cb=isArr?']':'}';
+  const ks=key!==null?Object.assign(document.createElement('span'),{className:'jt-key',textContent:String(key)+': '}):null;
+  const hdr=document.createElement('div');hdr.className='jt-toggle';
+  const arrow=Object.assign(document.createElement('span'),{className:'jt-arrow'+(open?' open':''),textContent:'▶'});
+  hdr.appendChild(arrow);
+  const inner=document.createElement('span');
+  if(ks)inner.appendChild(ks);inner.appendChild(muted(ob));
+  const prev=document.createElement('span');prev.className='jt-muted';prev.style.display=open?'none':'';
+  prev.textContent=' '+entries.slice(0,3).map(([,v])=>{
+    if(v===null)return'null';if(Array.isArray(v))return'[…]';if(typeof v==='object')return'{…}';
+    if(typeof v==='string')return`"${String(v).slice(0,20)}"`;return String(v);
+  }).join(', ')+(count>3?' …':'')+` (${count}) `;
+  inner.appendChild(prev);
+  const cbI=muted(cb);cbI.style.display=open?'none':'';inner.appendChild(cbI);hdr.appendChild(inner);
+  const ch=document.createElement('div');ch.className='jt-children';ch.style.display=open?'block':'none';
+  entries.forEach(([k,v])=>ch.appendChild(jtNode(v,isArr?null:k,depth+1,ed)));
+  const ft=document.createElement('div');
+  const cbF=muted(cb);cbF.style.display=open?'':'none';ft.appendChild(cbF);ft.appendChild(muted(','));
+  hdr.addEventListener('click',()=>{
+    const o=ch.style.display!=='none';
+    ch.style.display=o?'none':'block';arrow.classList.toggle('open',!o);
+    prev.style.display=o?'':'none';cbI.style.display=o?'':'none';cbF.style.display=o?'none':'';
+  });
+  w.appendChild(hdr);w.appendChild(ch);w.appendChild(ft);return w;
+}
+function muted(t){return Object.assign(document.createElement('span'),{className:'jt-muted',textContent:t});}
+function jtExpandAll(id){document.getElementById(id)?.querySelectorAll('.jt-arrow:not(.open)').forEach(a=>a.parentElement?.click());}
+function jtCollapseAll(id){document.getElementById(id)?.querySelectorAll('.jt-arrow.open').forEach(a=>a.parentElement?.click());}
+function jtSearch(id,q){
+  const data=_jtCache[id];if(!data)return;buildJT(id,data,1);if(!q)return;
+  jtExpandAll(id);const el=document.getElementById(id);if(el)hlText(el,q.toLowerCase());
+}
+function hlText(n,q){
+  if(n.nodeType===3){if(n.textContent.toLowerCase().includes(q)){const m=document.createElement('mark');m.className='jt-hl';m.textContent=n.textContent;n.replaceWith(m);}}
+  else Array.from(n.childNodes).forEach(c=>hlText(c,q));
+}
+
+// ═══════════════════════════════════════════════════════════ EDIT MODAL
+function openEdit(m){
+  document.getElementById('ef-id').value=m.id;document.getElementById('ef-uri').value=m.rsUri||uri;
+  document.getElementById('ef-host').value=m.host;document.getElementById('ef-priority').value=m.priority;
+  document.getElementById('ef-votes').value=m.votes;document.getElementById('ef-hidden').value=String(m.hidden);
+  document.getElementById('ef-delay').value=m.delay;updateEditCmd();
+  document.getElementById('editModal').classList.add('open');
+  ['ef-priority','ef-votes','ef-hidden','ef-delay'].forEach(id=>{document.getElementById(id).oninput=updateEditCmd;});
+}
+function updateEditCmd(){
+  const[p,h,v,d,id]=['ef-priority','ef-hidden','ef-votes','ef-delay','ef-id'].map(x=>document.getElementById(x).value);
+  document.getElementById('ef-cmd').textContent=`cfg=rs.conf();\nvar m=cfg.members.find(m=>m._id===${id});\nm.priority=${p};m.hidden=${h};\nm.votes=${v};m.secondaryDelaySecs=${d};\nrs.reconfig(cfg);`;
+}
+function closeEdit(){document.getElementById('editModal').classList.remove('open');}
+async function submitEdit(){
+  const fd=new FormData(document.getElementById('editForm'));
+  const r=await fetch('/api/rs/member/patch',{method:'POST',body:new URLSearchParams(fd)});
+  const j=await r.json();closeEdit();
+  if(j.error)return toast(j.error,'error');
+  toast(j.message||'Member updated','success');setTimeout(()=>nav('members'),600);
+}
+
+function openShardAuth(shardId, errorMsg, onComplete){
+  // Close any other open modals first
+  closeEdit();
+  closeWC();
+  
+  pendingShardAuth = {shardId, onComplete};
+  document.getElementById('shardAuthShardId').value = shardId;
+  document.getElementById('shardAuthError').textContent = errorMsg || 'Authentication required for this shard';
+  document.getElementById('shardAuthUsername').value = '';
+  document.getElementById('shardAuthPassword').value = '';
+  
+  // Reset the authenticate button to initial state
+  const authenticateBtn = document.querySelector('[onclick="submitShardAuth()"]');
+  if (authenticateBtn) {
+    authenticateBtn.textContent = 'Authenticate';
+    authenticateBtn.disabled = false;
+  }
+  
+  document.getElementById('shardAuthModal').classList.add('open');
+  document.getElementById('shardAuthUsername').focus();
+  
+  // Allow closing with Escape key
+  const closeOnEscape = (e) => {
+    if (e.key === 'Escape') {
+      closeShardAuth();
+      document.removeEventListener('keydown', closeOnEscape);
+    }
+  };
+  document.addEventListener('keydown', closeOnEscape);
+}
+
+function closeShardAuth(){
+  document.getElementById('shardAuthModal').classList.remove('open');
+  pendingShardAuth = null;
+}
+
+async function submitShardAuth(){
+  if(!pendingShardAuth) return closeShardAuth();
+  const username = document.getElementById('shardAuthUsername').value.trim();
+  const password = document.getElementById('shardAuthPassword').value;
+  
+  if(!username || !password){
+    toast('Username and password required','error');
+    return;
+  }
+  
+  // Show loading state
+  const authenticateBtn = document.querySelector('[onclick="submitShardAuth()"]');
+  const originalText = authenticateBtn?.textContent;
+  if (authenticateBtn) {
+    authenticateBtn.textContent = 'Testing...';
+    authenticateBtn.disabled = true;
+  }
+  
+  debugLog(`[submitShardAuth] Testing credentials for ${pendingShardAuth.shardId}`);
+  debugLog(`[submitShardAuth] Username: ${username}`);
+  
+  // SAVE callback BEFORE we clear pendingShardAuth
+  const onComplete = pendingShardAuth.onComplete;
+  const shardId = pendingShardAuth.shardId;
+  
+  // Get the original URI for this shard
+  const originalUri = shardUriMap[shardId];
+  if (!originalUri) {
+    debugLog(`[submitShardAuth] ERROR: No original URI found for ${shardId}`);
+    toast(`Internal error: Original URI not found for ${shardId}`, 'error');
+    if (authenticateBtn) {
+      authenticateBtn.textContent = originalText;
+      authenticateBtn.disabled = false;
+    }
+    return;
+  }
+  
+  // Replace credentials in the original URI
+  const testUri = replaceCredentialsInUri(originalUri, username, password);
+  
+  debugLog(`[submitShardAuth] Original URI: ${originalUri}`);
+  debugLog(`[submitShardAuth] Test URI: ${testUri}`);
+  
+  try {
+    const testResult = await api('/api/ping', {uri: testUri});
+    
+    if (testResult.error) {
+      debugLog(`[submitShardAuth] Ping failed: ${testResult.error}`);
+      toast(`Credentials test failed: ${testResult.error}`, 'error');
+      if (authenticateBtn) {
+        authenticateBtn.textContent = originalText;
+        authenticateBtn.disabled = false;
+      }
+      return;
+    }
+    
+    debugLog(`[submitShardAuth] Ping succeeded, saving credentials`);
+    
+    // Credentials work! Store them
+    shardCredentials[shardId] = {username, password};
+    toast(`Credentials verified and saved for ${shardId}`, 'success');
+    
+    // Close modal (this clears pendingShardAuth)
+    closeShardAuth();
+    
+    // Retry the original request using the SAVED callback
+    if(onComplete){
+      try{
+        debugLog(`[submitShardAuth] Retrying original request`);
+        await onComplete();
+      }catch(e){
+        debugLog(`[submitShardAuth] Retry failed: ${e.message}`);
+        toast(e.message,'error');
+      }
+    }
+  } catch (e) {
+    debugLog(`[submitShardAuth] Exception: ${e.message}`);
+    toast(`Error validating credentials: ${e.message}`, 'error');
+    if (authenticateBtn) {
+      authenticateBtn.textContent = originalText;
+      authenticateBtn.disabled = false;
+    }
+  }
+}
+
+// Helper: Replace credentials in a URI without changing the rest
+function replaceCredentialsInUri(uri, newUsername, newPassword) {
+  // mongodb://[username:password@]host:port
+  
+  // Check if URI already has credentials
+  const atIdx = uri.indexOf('@');
+  let baseUri;
+  
+  if (atIdx >= 0) {
+    // Remove existing credentials
+    const scheme = uri.substring(0, uri.indexOf('://') + 3);
+    baseUri = scheme + uri.substring(atIdx + 1);
+  } else {
+    baseUri = uri;
+  }
+  
+  // Insert new credentials
+  const schemeIdx = baseUri.indexOf('://');
+  if (schemeIdx >= 0) {
+    return baseUri.substring(0, schemeIdx + 3) + 
+           encodeURIComponent(newUsername) + ':' + 
+           encodeURIComponent(newPassword) + '@' + 
+           baseUri.substring(schemeIdx + 3);
+  }
+  
+  return uri; // Fallback if something goes wrong
+}
+
+// Check results array for authentication errors and prompt if needed
+async function handleAuthErrorsInResults(results) {
+  for (const result of results) {
+    if (result.error && (result.error.includes('Unauthorized') || result.error.includes('AuthenticationFailed'))) {
+      const rawShardId = result.shardId || result.uri;
+      // Extract a simple identifier (hostname:port or shard name)
+      const simpleShardId = extractShardIdFromUri(rawShardId);
+      
+      // Store the original URI so we can use it for credential testing
+      const originalUri = result.uri || result.shardId;
+      shardUriMap[simpleShardId] = originalUri;
+      
+      debugLog(`[handleAuthErrorsInResults] Auth error for ${simpleShardId}, storing original URI: ${originalUri}`);
+      
+      // Return a promise that resolves when user provides auth
+      return new Promise((resolve) => {
+        openShardAuth(simpleShardId, result.error, async () => {
+          const creds = shardCredentials[simpleShardId];
+          if (creds) {
+            // Credentials have been stored, resolve to retry
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        });
+      });
+    }
+  }
+  return false; // No auth errors found
+}
+
+// ═══════════════════════════════════════════════════════════ HELPERS
+// Extract a simple shard identifier from a URI for credentials storage
+function extractShardIdFromUri(uriStr) {
+  // Try to extract shard name (shard00, shard01, etc.) from URI
+  const shardMatch = uriStr.match(/shard\d+/i);
+  if (shardMatch) {
+    return shardMatch[0];
+  }
+  
+  // Try to extract hostname:port
+  try {
+    const match = uriStr.match(/^mongodb\+?srv?:\/\/(?:[^@]*@)?([^\/\?]+)/);
+    if (match && match[1]) {
+      return match[1]; // Just hostname:port
+    }
+  } catch (_) {}
+  
+  return uriStr; // Fallback to full URI
+}
+
+// Extract credentials from initial connection URI
+function extractCredentials(uriStr) {
+  if (!uriStr) return { username: '', password: '' };
+  try {
+    // Match both mongodb:// and mongodb+srv://
+    const match = uriStr.match(/^mongodb(?:\+srv)?:\/\/(?:([^:@]+):([^@]*)@)?/);
+    if (match && match[1]) {
+      return { username: match[1] || '', password: match[2] || '' };
+    }
+  } catch (_) {}
+  return { username: '', password: '' };
+}
+
+// Build URI with credentials for a specific host
+function buildUriWithCredentials(host, creds, options = {}) {
+  const params = new URLSearchParams(options);
+  const queryStr = params.toString() ? '/?' + params.toString() : '';
+  if (!creds.username || !creds.password) {
+    return `mongodb://${host}${queryStr}`;
+  }
+  return `mongodb://${creds.username}:${creds.password}@${host}${queryStr}`;
+}
+
+function maskPassword(uriStr){
+  if(!uriStr)return '';
+  try{
+    // Look for pattern: scheme://username:password@host
+    // Replace the password part with asterisks
+    return uriStr.replace(/(:\/\/[^:]+:)([^@]+)(@)/, function(match, userPart, password, atSign) {
+      const masked = '*'.repeat(Math.min(password.length, 10));
+      return userPart + masked + atSign;
+    });
+  }catch(_){
+    return uriStr;
+  }
+}
+
+// Extract just the host part from a URI (without credentials)
+function getHostFromUri(uriStr){
+  if(!uriStr)return '';
+  try{
+    // Match both mongodb:// and mongodb+srv://
+    const match=uriStr.match(/^mongodb(?:\+srv)?:\/\/(?:[^@]*@)?([^\/\?]+)/);
+    return match?match[1]:'';
+  }catch(_){
+    return '';
+  }
+}
+
+function pageHeader(icon,title,sub,actions=''){
+  return `<div class="flex items-start gap-3 mb-1">
+    <span class="text-2xl mt-0.5">${icon}</span>
+    <div class="flex-1 min-w-0"><div class="text-xl font-bold tracking-tight">${title}</div>
+      ${sub?`<div class="text-xs text-gray-500 mt-0.5">${sub}</div>`:''}</div>
+    ${actions?`<div class="flex gap-2 items-center shrink-0 flex-wrap">${actions}</div>`:''}
+  </div>`;
+}
+function statCard(label,value,sub,cls){
+  return `<div class="bg-panel-inner border border-panel-border rounded-lg p-3">
+    <div class="text-xs text-gray-500 uppercase font-semibold tracking-wide mb-0.5">${esc(String(label))}</div>
+    <div class="text-lg font-bold ${cls||'text-gray-100'}">${value}</div>
+    ${sub?`<div class="text-xs text-gray-600 mt-0.5 mono leading-tight">${sub}</div>`:''}
+  </div>`;
+}
+function errBox(msg){return `<div class="text-red-400 bg-red-900/20 border border-red-800 rounded p-4 text-sm mono">${esc(String(msg))}</div>`;}
+function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+let _tt;
+function toast(msg,type='success'){
+  const el=document.getElementById('toast');
+  el.textContent=(type==='success'?'✓ ':'✗ ')+msg;
+  el.style.cssText=`opacity:1;background:${type==='success'?'#003d1a':'#3d0e0a'};color:${type==='success'?'#00ed64':'#f85149'};border:1px solid ${type==='success'?'#00ed64':'#f85149'};border-radius:8px;padding:10px 14px;`;
+  clearTimeout(_tt);_tt=setTimeout(()=>{el.style.opacity='0';},4000);
+}
+</script>
+</body>
+</html>
