@@ -43,9 +43,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const version = "0.3.1"
+const version = "0.3.2"
 
 var debugMode bool
+var viewOnly  bool
 
 // ── connection pool ───────────────────────────────────────────────────────────
 
@@ -1270,6 +1271,91 @@ func handleServerStatus(w http.ResponseWriter, r *http.Request) {
 	res, err := runCmd(formURI(r), "admin", bson.D{{Key: "serverStatus", Value: 1}})
 	if err != nil {
 		jsonErr(w, err.Error(), 500)
+		return
+	}
+	jsonOK(w, res)
+}
+
+// handleServerMetrics is a lightweight alternative to handleServerStatus for
+// high-frequency polling (e.g. the live traffic monitor).  The caller passes a
+// comma-separated `sections` query/form value listing only the serverStatus
+// top-level sections it actually needs (e.g. "opcounters,connections,network").
+// Every other heavy section is explicitly suppressed in the command so the
+// server skips computing and serialising it.  A full serverStatus on a busy
+// replica set can exceed 500 KB; a targeted fetch of two or three sections
+// typically comes back in under 3 KB.
+//
+// Sections that are always lightweight and returned unconditionally by MongoDB
+// regardless of suppression flags (host, version, pid, uptime, localTime,
+// process, asserts) are kept as-is; we only suppress the genuinely expensive
+// ones.
+func handleServerMetrics(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+
+	// Parse the requested sections (comma-separated)
+	raw := strings.TrimSpace(r.FormValue("sections"))
+	want := map[string]bool{}
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			want[s] = true
+		}
+	}
+
+	// Complete list of sections that are expensive / bulky and safe to suppress.
+	// Any section NOT in this list is either always-present (host, uptime …) or
+	// lightweight enough that leaving it in causes no harm.
+	heavy := []string{
+		"wiredTiger",
+		"repl",
+		"tcmalloc",
+		"locks",
+		"metrics",
+		"logicalSessionRecordCache",
+		"storageEngine",
+		"transactions",
+		"twoPhaseCommitCoordinator",
+		"sharding",
+		"catalogStats",
+		"indexBuilds",
+		"mirroredReads",
+		"flowControl",
+		"electionMetrics",
+		"opLatencies",
+		"trafficRecording",
+		"queryAnalyzers",
+		"changeStreamPreImages",
+		"querySettings",
+	}
+
+	cmd := bson.D{{Key: "serverStatus", Value: 1}}
+	for _, sec := range heavy {
+		if !want[sec] {
+			cmd = append(cmd, bson.E{Key: sec, Value: 0})
+		}
+	}
+
+	res, err := runCmd(formURI(r), "admin", cmd)
+	if err != nil {
+		jsonErr(w, err.Error(), 500)
+		return
+	}
+
+	// Return only the requested sections plus the always-present lightweight
+	// fields so callers don't have to deal with unexpected keys.
+	alwaysKeep := map[string]bool{
+		"host": true, "version": true, "process": true,
+		"pid": true, "uptime": true, "uptimeMillis": true,
+		"localTime": true, "ok": true,
+	}
+	if len(want) > 0 {
+		filtered := map[string]interface{}{}
+		for k, v := range res {
+			if want[k] || alwaysKeep[k] {
+				filtered[k] = v
+			}
+		}
+		jsonOK(w, filtered)
 		return
 	}
 	jsonOK(w, res)
@@ -3002,7 +3088,21 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, nil)
+	_ = tmpl.Execute(w, map[string]interface{}{
+		"ViewOnly": viewOnly,
+	})
+}
+
+// readOnlyGuard wraps an http.HandlerFunc and returns 403 with a JSON error
+// when the server is running in --view-only mode.
+func readOnlyGuard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if viewOnly {
+			jsonErr(w, "Server is running in view-only mode — write operations are disabled", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func main() {
@@ -3013,6 +3113,7 @@ func main() {
 	tlsEnabled := flag.Bool("tls", false, "Enable HTTPS with self-signed certificate")
 	certFile := flag.String("cert", "mongoadmin.crt", "Path to TLS certificate file")
 	keyFile := flag.String("key", "mongoadmin.key", "Path to TLS key file")
+	viewOnlyFlag := flag.Bool("view-only", false, "Disable all write/mutating operations (read-only mode)")
 	flag.Parse()
 
 	if *showVersion {
@@ -3021,6 +3122,7 @@ func main() {
 	}
 
 	debugMode = *debug
+	viewOnly  = *viewOnlyFlag
 
 	src, err := os.ReadFile("templates/index.html")
 	if err != nil {
@@ -3038,38 +3140,39 @@ func main() {
 	mux.HandleFunc("/api/rs/status/all",        handleAllRsStatus)
 	mux.HandleFunc("/api/rs/members",           handleRsMembers)
 	mux.HandleFunc("/api/sh/status",            handleShStatus)
-	mux.HandleFunc("/api/sh/balancer",          handleBalancerToggle)
-	mux.HandleFunc("/api/sh/write-concern",     handleSetWriteConcern)
-	mux.HandleFunc("/api/rs/flow-control",      handleFlowControl)
+	mux.HandleFunc("/api/sh/balancer",          readOnlyGuard(handleBalancerToggle))
+	mux.HandleFunc("/api/sh/write-concern",     readOnlyGuard(handleSetWriteConcern))
+	mux.HandleFunc("/api/rs/flow-control",      readOnlyGuard(handleFlowControl))
 	mux.HandleFunc("/api/server/status",        handleServerStatus)
+	mux.HandleFunc("/api/server/metrics",       handleServerMetrics)
 	mux.HandleFunc("/api/server/hostinfo",       handleHostInfo)
 	mux.HandleFunc("/api/server/top-commands",  handleTopCommands)
 	mux.HandleFunc("/api/current-op",           handleCurrentOp)
-	mux.HandleFunc("/api/kill-op",              handleKillOp)
-	mux.HandleFunc("/api/rs/member/patch",      handlePatchMember)
+	mux.HandleFunc("/api/kill-op",              readOnlyGuard(handleKillOp))
+	mux.HandleFunc("/api/rs/member/patch",      readOnlyGuard(handlePatchMember))
 	mux.HandleFunc("/api/server/getparam",         handleGetParameter)
 	mux.HandleFunc("/api/db/stats",                handleDbStats)
 	mux.HandleFunc("/api/db/sharded-collections",  handleShardedCollections)
 	mux.HandleFunc("/api/db/chunk-distribution",   handleChunkDistribution)
 	mux.HandleFunc("/api/db/coll-stats",           handleCollStats)
 	mux.HandleFunc("/api/db/indexes",              handleListIndexes)
-	mux.HandleFunc("/api/db/drop-index",           handleDropIndex)
+	mux.HandleFunc("/api/db/drop-index",           readOnlyGuard(handleDropIndex))
 	mux.HandleFunc("/api/db/oplog-stats",          handleOplogStats)
 	mux.HandleFunc("/api/db/profiler-level",       handleGetProfilingLevel)
-	mux.HandleFunc("/api/db/profiler-level-set",   handleSetProfilingLevel)
+	mux.HandleFunc("/api/db/profiler-level-set",   readOnlyGuard(handleSetProfilingLevel))
 	mux.HandleFunc("/api/db/profiler-entries",     handleProfilerEntries)
 	mux.HandleFunc("/api/db/log",                  handleGetLog)
 	mux.HandleFunc("/api/db/wiredtiger",           handleWiredTiger)
 	mux.HandleFunc("/api/user/roles",              handleGetRoles)
 	mux.HandleFunc("/api/user/role-detail",        handleGetRoleDetail)
-	mux.HandleFunc("/api/user/update-role",        handleUpdateRole)
-	mux.HandleFunc("/api/user/delete-role",        handleDeleteRole)
-	mux.HandleFunc("/api/user/create-role",        handleCreateRole)
+	mux.HandleFunc("/api/user/update-role",        readOnlyGuard(handleUpdateRole))
+	mux.HandleFunc("/api/user/delete-role",        readOnlyGuard(handleDeleteRole))
+	mux.HandleFunc("/api/user/create-role",        readOnlyGuard(handleCreateRole))
 	mux.HandleFunc("/api/user/users",              handleGetUsers)
-	mux.HandleFunc("/api/user/create-user",        handleCreateUser)
-	mux.HandleFunc("/api/user/delete-user",        handleDeleteUser)
-	mux.HandleFunc("/api/user/set-user-roles",     handleSetUserRoles)
-	mux.HandleFunc("/api/user/update-user-roles",  handleUpdateUserRoles)
+	mux.HandleFunc("/api/user/create-user",        readOnlyGuard(handleCreateUser))
+	mux.HandleFunc("/api/user/delete-user",        readOnlyGuard(handleDeleteUser))
+	mux.HandleFunc("/api/user/set-user-roles",     readOnlyGuard(handleSetUserRoles))
+	mux.HandleFunc("/api/user/update-user-roles",  readOnlyGuard(handleUpdateUserRoles))
 
 	// Validate port
 	addr := ":" + *tcpPort

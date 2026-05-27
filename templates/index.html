@@ -3,11 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="license" content="GNU General Public License v3.0">
-<meta name="license-url" content="https://www.gnu.org/licenses/gpl-3.0">
-<meta name="author" content="Przemysław Malkowski">
-<meta name="copyright" content="Copyright (C) 2026 Przemysław Malkowski">
-<meta name="description" content="MongoAdmin — lightweight MongoDB admin panel">
 <title>MongoAdmin</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
@@ -46,6 +41,8 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 .cmd-scroll{max-height:420px;overflow-y:auto;}
 .spinner{border:2px solid #21262d;border-top-color:#00ed64;border-radius:50%;width:20px;height:20px;animation:spin .6s linear infinite;display:inline-block;}
 @keyframes spin{to{transform:rotate(360deg);}}
+@keyframes tm-pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.tm-live-dot{animation:tm-pulse 1.4s ease-in-out infinite;}
 ::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-track{background:#0d1117;}::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px;}
 .modal-wrap{display:none;}.modal-wrap.open{display:flex;}
 .card{background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden;}
@@ -137,6 +134,7 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
   <div class="p-3">
     <div class="text-xs font-bold text-gray-600 uppercase tracking-widest px-2 mb-2">Operations</div>
     <button onclick="nav('currentOp')"    id="nav-currentOp"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">⚡ Current Ops</button>
+    <button onclick="nav('trafficMonitor')" id="nav-trafficMonitor" class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📈 Live Traffic</button>
     <button onclick="nav('slowQueries')"  id="nav-slowQueries"  class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🐢 Slow Queries</button>
     <button onclick="nav('logViewer')"    id="nav-logViewer"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📜 Log Viewer</button>
     <button onclick="nav('usersRoles')"   id="nav-usersRoles"   class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">👥 Users & Roles</button>
@@ -346,6 +344,9 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 <div id="toast" class="fixed bottom-5 right-5 z-50 px-4 py-3 rounded-lg text-sm font-medium shadow-xl opacity-0 transition-all duration-300 pointer-events-none max-w-sm"></div>
 
 <script>
+// ── View-only mode: injected by the Go template at serve time ─────────────
+const VIEW_ONLY = {{if .ViewOnly}}true{{else}}false{{end}};
+
 // ═══════════════════════════════════════════════════════════ STATE
 let uri='', topology={type:'replicaset',nodes:[]}, currentPage='';
 let opFilter='active', opTargetURI='', ssTargetURI='', rsCfgTargetURI='', usersRolesURI='';
@@ -356,6 +357,13 @@ let shardUriMap={}; // Map of shardId -> original URI for credential testing
 let pendingShardAuth=null; // {shardId, onComplete}
 let _membersGen=0; // Generation counter — incremented on each Cluster Diagram load to cancel stale async updates
 let _lgParsed=[]; // Current log viewer display lines — kept module-level so lgToggle can access them by row index
+// Live Traffic Monitor state
+let tmRunning=false, tmIntervalId=null, tmInFlight=false, tmGen=0;
+let tmSeries={}, tmPrev={};         // {hostId: {metricKey: {times[], values[]}}}
+let tmSelMetrics=[], tmSelHosts=[]; // active metric/host selection
+let tmWindowSecs=3600, tmIntervalSecs=1;
+let tmHidden=new Set();             // host IDs whose series are hidden on the chart
+let tmZoom={};                      // {metricIdx: {tMin, tMax, dragX0}} per-canvas zoom state
 let urShowBuiltin = false;  // User mgmt: show built-in roles toggle
 let urSelectedDb  = '';     // User mgmt: persisted db selection
 const rsNodesList   =()=>topology.nodes.filter(n=>n.role==='shard'||n.role==='configsvr');
@@ -459,9 +467,11 @@ function setStatus(label,color){
 }
 
 // ═══════════════════════════════════════════════════════════ NAV
-const pages={rsStatus,rsConfig,members,shStatus,serverStatus,wiredTiger,oplogStats,dbStats,collStats,indexMgmt,currentOp,slowQueries,logViewer,usersRoles};
+const pages={rsStatus,rsConfig,members,shStatus,serverStatus,wiredTiger,oplogStats,dbStats,collStats,indexMgmt,currentOp,trafficMonitor,slowQueries,logViewer,usersRoles};
 async function nav(page){
   if(!uri) return toast('Connect first','error');
+  // Pause live traffic monitor polling when leaving that page
+  if(page!=='trafficMonitor' && tmRunning){ clearInterval(tmIntervalId); tmIntervalId=null; tmRunning=false; }
   currentPage=page;
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('nav-active'));
   const nb=document.getElementById('nav-'+page); if(nb) nb.classList.add('nav-active');
@@ -469,7 +479,16 @@ async function nav(page){
   try{await pages[page]();}catch(e){setMain(errBox(e.message));}
 }
 function setLoading(){setMain('<div class="flex items-center gap-3 text-gray-500 mt-20 justify-center"><div class="spinner"></div> Loading…</div>');}
-function setMain(h){document.getElementById('main').innerHTML=h;}
+function setMain(h){
+  const banner=VIEW_ONLY
+    ?`<div class="flex items-center gap-2 px-4 py-2 mb-4 rounded-lg text-xs font-semibold"
+          style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.3);color:#f85149">
+        <span style="font-size:.95rem">🔒</span>
+        View-only mode — all write and mutating operations are disabled
+      </div>`
+    :'';
+  document.getElementById('main').innerHTML=banner+h;
+}
 
 // ═══════════════════════════════════════════════════════════ API
 async function api(path,params={}){
@@ -948,7 +967,7 @@ async function loadRsSection(node, idx, creds, gen) {
           <div class="text-gray-500">Health</div><div>${st.health===1?'<span class="text-mg">✓</span>':'<span class="text-red-400">✗</span>'}</div>
         </div>
         ${Object.keys(m.tags||{}).length?`<div class="flex flex-wrap gap-1 mb-3">${Object.entries(m.tags).map(([k,v])=>`<span class="text-xs px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 mono">${esc(k)}=${esc(v)}</span>`).join('')}</div>`:''}
-        ${!isArbiter?`<button onclick='openEdit(${JSON.stringify({id:m._id,host:m.host,priority:m.priority,hidden:m.hidden,votes:m.votes,delay:m.secondaryDelaySecs||0,rsUri:node.uri})})' class="btn-sm w-full text-center mt-1">✏️ Edit</button>`:''}
+        ${!isArbiter&&!VIEW_ONLY?`<button onclick='openEdit(${JSON.stringify({id:m._id,host:m.host,priority:m.priority,hidden:m.hidden,votes:m.votes,delay:m.secondaryDelaySecs||0,rsUri:node.uri})})' class="btn-sm w-full text-center mt-1">✏️ Edit</button>`:''}
         ${actionBtns}
       </div>`;
     }).join('');
@@ -1097,48 +1116,53 @@ async function shStatus(){
       ${statCard('Databases',dbs.length,'','')}
     </div>
 
-    <!-- Balancer control + stats -->
-    <div class="card">
-      <div class="card-header">⚖️ Balancer</div>
-      <div class="p-4 space-y-4">
-        <div class="flex flex-wrap gap-4 items-center pb-3 border-b border-panel-border">
-          <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-            <div class="text-gray-500">Currently enabled</div><div class="font-bold ${balOn?'text-mg':'text-yellow-400'}">${balOn?'yes':'no'}</div>
-            <div class="text-gray-500">Currently running</div><div class="font-bold ${bal.inBalancerRound?'text-yellow-400':'text-gray-300'}">${bal.inBalancerRound?'yes':'no'}</div>
-            <div class="text-gray-500">Failed rounds (last 5)</div>
-            <div class="font-bold ${failedRounds>0?'text-red-400':'text-mg'}">${failedRounds}</div>
+    <!-- Balancer + Write Concern — 2/3 + 1/3 row -->
+    <div class="grid gap-4" style="grid-template-columns:2fr 1fr;align-items:start">
+
+      <!-- Balancer control + stats -->
+      <div class="card">
+        <div class="card-header">⚖️ Balancer</div>
+        <div class="p-4 space-y-4">
+          <div class="flex flex-wrap gap-4 items-center pb-3 border-b border-panel-border">
+            <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              <div class="text-gray-500">Currently enabled</div><div class="font-bold ${balOn?'text-mg':'text-yellow-400'}">${balOn?'yes':'no'}</div>
+              <div class="text-gray-500">Currently running</div><div class="font-bold ${bal.inBalancerRound?'text-yellow-400':'text-gray-300'}">${bal.inBalancerRound?'yes':'no'}</div>
+              <div class="text-gray-500">Failed rounds (last 5)</div>
+              <div class="font-bold ${failedRounds>0?'text-red-400':'text-mg'}">${failedRounds}</div>
+            </div>
+            ${VIEW_ONLY?'':`<button onclick="toggleBalancer(${!balOn})" class="${balOn?'btn-danger':'btn-sm'} ml-auto">
+              ${balOn?'⏹ Stop Balancer':'▶ Start Balancer'}</button>`}
           </div>
-          <button onclick="toggleBalancer(${!balOn})" class="${balOn?'btn-danger':'btn-sm'} ml-auto">
-            ${balOn?'⏹ Stop Balancer':'▶ Start Balancer'}</button>
-        </div>
 
-        <!-- Migration results last 24h -->
-        <div>
-          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Migration Results — Last 24 Hours</div>
-          ${migResults.length?`<table class="dt"><thead><tr><th>Result</th><th>Count</th></tr></thead><tbody>${migRows}</tbody></table>`:
-            '<div class="text-gray-600 text-sm">No migration data</div>'}
-        </div>
+          <!-- Migration results last 24h -->
+          <div>
+            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Migration Results — Last 24 Hours</div>
+            ${migResults.length?`<table class="dt"><thead><tr><th>Result</th><th>Count</th></tr></thead><tbody>${migRows}</tbody></table>`:
+              '<div class="text-gray-600 text-sm">No migration data</div>'}
+          </div>
 
-        <!-- Last 5 balancer rounds -->
-        ${balRounds.length?`<div>
-          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Last 5 Balancer Rounds</div>
-          <table class="dt"><thead><tr><th>Time</th><th>Status</th><th>Details</th></tr></thead>
-          <tbody>${roundRows}</tbody></table>
-        </div>`:''}
+          <!-- Last 5 balancer rounds -->
+          ${balRounds.length?`<div>
+            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Last 5 Balancer Rounds</div>
+            <table class="dt"><thead><tr><th>Time</th><th>Status</th><th>Details</th></tr></thead>
+            <tbody>${roundRows}</tbody></table>
+          </div>`:''}
+        </div>
       </div>
-    </div>
 
-    <!-- Write concern -->
-    <div class="card">
-      <div class="card-header">✍️ Default Write Concern</div>
-      <div class="p-4 flex flex-wrap gap-6 items-center">
-        <div class="text-sm space-y-1">
-          <div>w: <code class="text-mg mono">${esc(String(dwc.w||'—'))}</code></div>
-          <div>j: <code class="mono">${dwc.j!==undefined?String(dwc.j):'—'}</code></div>
-          <div>wtimeout: <code class="mono">${dwc.wtimeout!==undefined?dwc.wtimeout:'—'}</code></div>
+      <!-- Write Concern — narrow 1/3 column -->
+      <div class="card">
+        <div class="card-header">✍️ Default Write Concern</div>
+        <div class="p-4 space-y-3">
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <div class="text-gray-500">w</div><div><code class="text-mg mono font-bold">${esc(String(dwc.w||'—'))}</code></div>
+            <div class="text-gray-500">j</div><div><code class="mono">${dwc.j!==undefined?String(dwc.j):'—'}</code></div>
+            <div class="text-gray-500">wtimeout</div><div><code class="mono">${dwc.wtimeout!==undefined?dwc.wtimeout:'—'}</code></div>
+          </div>
+          ${VIEW_ONLY?'':`<button onclick="openWC()" class="btn-sm mt-2">✏️ Edit</button>`}
         </div>
-        <button onclick="openWC()" class="btn-sm">✏️ Edit</button>
       </div>
+
     </div>
 
     <!-- Shards list -->
@@ -1342,8 +1366,8 @@ async function serverStatus(targetURI){
           <div><label class="text-xs text-gray-500 block mb-1">Target Lag (s) <span class="text-blue-400">[current: ${fcTargetLagSecs}]</span></label>
             <input id="fc-lag" type="number" min="1" value="${fcTargetLagSecs}" class="fi w-28"></div>
           <button onclick="applyFlowControlLag()" class="btn-sm">Apply Lag</button>
-          <button onclick="toggleFlowControl(${!fcEnabled})" class="${fcEnabled?'btn-danger':'btn-sm'}">
-            ${fcEnabled?'⏹ Disable FC':'▶ Enable FC'}</button>
+          ${VIEW_ONLY?'':`<button onclick="toggleFlowControl(${!fcEnabled})" class="${fcEnabled?'btn-danger':'btn-sm'}">
+            ${fcEnabled?'⏹ Disable FC':'▶ Enable FC'}</button>`}
         </div>
       </div>
     </div>`;
@@ -1601,7 +1625,7 @@ async function currentOp(filter){
     <button onclick="currentOp('active')" class="btn-sm ${opFilter==='active'?'btn-active':''}">Active only</button>
     <button onclick="currentOp('all')"    class="btn-sm ${opFilter==='all'?'btn-active':''}">All</button>
     <button onclick="currentOp()" class="btn-sm">↻</button>
-    <button onclick="openBatchKillModal()" class="btn-danger">⚡ Batch Kill…</button>
+    ${VIEW_ONLY?'':`<button onclick="openBatchKillModal()" class="btn-danger">⚡ Batch Kill…</button>`}
   </div>`;
 
   const d=await api('/api/current-op',{uri:opTargetURI});
@@ -1626,7 +1650,7 @@ async function currentOp(filter){
         <button onclick="currentOp('active')" class="btn-sm ${opFilter==='active'?'btn-active':''}">Active only</button>
         <button onclick="currentOp('all')"    class="btn-sm ${opFilter==='all'?'btn-active':''}">All</button>
         <button onclick="currentOp()" class="btn-sm">↻</button>
-        <button onclick="openBatchKillModal()" class="btn-danger">⚡ Batch Kill…</button>
+        ${VIEW_ONLY?'':`<button onclick="openBatchKillModal()" class="btn-danger">⚡ Batch Kill…</button>`}
       </div>`)}
     <div class="grid grid-cols-4 gap-3">
       ${statCard('Shown',ops.length,opFilter+' filter','')}
@@ -1710,7 +1734,7 @@ function buildOpTable(){
       <td>${op.waitingForLock?'<span class="text-yellow-400">⚠</span>':'<span class="text-gray-700">—</span>'}</td>
       <td onclick="event.stopPropagation()">
         ${isKillable
-          ?`<button onclick="killSingleOp('${esc(opidStr)}')" class="btn-xs" style="color:#f87171;border-color:#7f1d1d" title="Kill this operation">✕ Kill</button>`
+          ?VIEW_ONLY?'':(`<button onclick="killSingleOp('${esc(opidStr)}')" class="btn-xs" style="color:#f87171;border-color:#7f1d1d" title="Kill this operation">✕ Kill</button>`)
           :'<span class="text-gray-700 text-xs">—</span>'}
       </td>
       <td class="text-gray-600 text-xs">▼</td>
@@ -1965,8 +1989,8 @@ async function usersRoles(targetURI) {
           : '<span class="text-gray-600">—</span>'}</td>
         <td class="text-right">
           ${r.isBuiltin ? '<span class="text-xs text-gray-600">built-in</span>' : `
-            <button onclick="event.stopPropagation();openEditRoleModal('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️</button>
-            <button onclick="event.stopPropagation();deleteRole('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>
+            ${VIEW_ONLY?'':`<button onclick="event.stopPropagation();openEditRoleModal('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️</button>
+            <button onclick="event.stopPropagation();deleteRole('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>`}
           `}
         </td>
         <td class="text-gray-600 text-xs">▼</td>
@@ -1984,7 +2008,7 @@ async function usersRoles(targetURI) {
         : '<span class="text-gray-600">no roles</span>'}</td>
       <td class="text-right">
         <button onclick="editUserRoles('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️ Edit roles</button>
-        <button onclick="deleteUser('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>
+        ${VIEW_ONLY?'':`<button onclick="deleteUser('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>`}
       </td>
     </tr>`).join('');
 
@@ -2016,7 +2040,7 @@ async function usersRoles(targetURI) {
               class="btn-sm ${urShowBuiltin ? 'btn-active' : ''}">
               ${urShowBuiltin ? '👁 Hide built-in' : '👁 Show built-in'}
             </button>
-            <button onclick="openCreateRoleModal('${esc(urSelectedDb)}')" class="btn-sm">➕ Create Role</button>
+            ${VIEW_ONLY?'':`<button onclick="openCreateRoleModal('${esc(urSelectedDb)}')" class="btn-sm">➕ Create Role</button>`}
           </div>
         </div>
         <div class="overflow-x-auto"><table class="dt">
@@ -2030,7 +2054,7 @@ async function usersRoles(targetURI) {
 
       <div class="card">
         <div class="card-header">👤 Users
-          <button onclick="openCreateUserModal('${esc(urSelectedDb)}')" class="btn-sm ml-auto">➕ Create User</button>
+          ${VIEW_ONLY?'':`<button onclick="openCreateUserModal('${esc(urSelectedDb)}')" class="btn-sm ml-auto">➕ Create User</button>`}
         </div>
         <div class="overflow-x-auto"><table class="dt">
           <thead><tr><th>Username</th><th>Database</th><th>Roles</th><th></th></tr></thead>
@@ -2691,7 +2715,7 @@ async function indexMgmt(){
       <td class="mono text-xs">${idx.sizeBytes > 0 ? fmtB(idx.sizeBytes) : '—'}</td>
       <td>${idx.name==='_id_' || idx.shardKeyIdx
         ? `<span class="text-xs text-gray-600" title="${idx.shardKeyIdx?'Sole index covering shard key — cannot drop':'Primary key'}">${idx.shardKeyIdx?'🔒 shard key':'🔒 primary'}</span>`
-        : `<button onclick="dropIndex('${esc(idx.name)}')" class="btn-xs" style="color:#f87171;border-color:#7f1d1d">🗑 Drop</button>`}</td>
+        : VIEW_ONLY?'<span class="text-xs text-gray-600">view-only</span>':`<button onclick="dropIndex('${esc(idx.name)}')" class="btn-xs" style="color:#f87171;border-color:#7f1d1d">🗑 Drop</button>`}</td>
     </tr>`;
   }).join('');
 
@@ -2795,7 +2819,7 @@ async function slowQueries(targetURI){
           </select></div>
         <div><label class="text-xs text-gray-500 block mb-1">slowMs threshold</label>
           <input id="profSlowMs" type="number" min="0" value="${slowMs}" class="fi w-24 text-xs"></div>
-        <button onclick="applyProfiler()" class="btn-sm">Apply</button>
+        ${VIEW_ONLY?'':`<button onclick="applyProfiler()" class="btn-sm">Apply</button>`}
       </div>
     </div>
     <div class="card">
@@ -3063,6 +3087,713 @@ function lgToggle(tr, idx) {
   if (chev) chev.style.transform = 'rotate(90deg)';
 }
 function setLgURI(u){lgTargetURI=u;logViewer();}
+
+// ═══════════════════════════════════════════════════════════ LIVE TRAFFIC MONITOR
+
+// Metric catalog — each entry describes one serverStatus field.
+// type:'ctr' = cumulative counter (we compute per-second delta between samples)
+// type:'gau' = instantaneous gauge (used as-is)
+// scale       = optional multiplier applied AFTER delta (e.g. bytes→KB)
+// section     = top-level serverStatus section this metric lives in — used to
+//               build the minimal /api/server/metrics request for the poller
+const TM_METRICS = [
+  {key:'ins',   label:'Insert ops/s',     unit:'ops/s',  path:['opcounters','insert'],               type:'ctr', section:'opcounters'},
+  {key:'qry',   label:'Query ops/s',      unit:'ops/s',  path:['opcounters','query'],                type:'ctr', section:'opcounters'},
+  {key:'upd',   label:'Update ops/s',     unit:'ops/s',  path:['opcounters','update'],               type:'ctr', section:'opcounters'},
+  {key:'del',   label:'Delete ops/s',     unit:'ops/s',  path:['opcounters','delete'],               type:'ctr', section:'opcounters'},
+  {key:'cmd',   label:'Commands/s',       unit:'cmd/s',  path:['opcounters','command'],              type:'ctr', section:'opcounters'},
+  {key:'gm',    label:'Getmore/s',        unit:'ops/s',  path:['opcounters','getmore'],              type:'ctr', section:'opcounters'},
+  {key:'conn',  label:'Connections',      unit:'',       path:['connections','current'],             type:'gau', section:'connections'},
+  {key:'aconn', label:'Active conns',     unit:'',       path:['connections','active'],              type:'gau', section:'connections'},
+  {key:'neti',  label:'Net in KB/s',      unit:'KB/s',   path:['network','bytesIn'],                 type:'ctr', scale:1/1024, section:'network'},
+  {key:'neto',  label:'Net out KB/s',     unit:'KB/s',   path:['network','bytesOut'],                type:'ctr', scale:1/1024, section:'network'},
+  {key:'mem',   label:'Resident MB',      unit:'MB',     path:['mem','resident'],                    type:'gau', section:'mem'},
+  {key:'queue', label:'Lock queue depth', unit:'',       path:['globalLock','currentQueue','total'], type:'gau', section:'globalLock'},
+];
+
+// Derive the minimal comma-separated sections string for the selected metrics.
+// The backend suppresses every expensive section not in this list.
+function tmSections(metrics) {
+  return [...new Set(metrics.map(m => m.section))].join(',');
+}
+
+// Per-host color palette — consistent across all metric charts
+const TM_COLORS = ['#00ed64','#58a6ff','#f85149','#e3b341','#a78bfa','#22d3ee','#fb923c','#a3e635','#f43f5e','#fbbf24'];
+
+// ── Data helpers ─────────────────────────────────────────────────────────────
+
+// Walk a dot-path into the serverStatus object, return numeric value or null
+function tmExtract(ss, metric) {
+  let v = ss;
+  for (const k of metric.path) { if (v == null) return null; v = v[k]; }
+  return typeof v === 'number' ? v : null;
+}
+
+// Push one (time, value) sample into a ring-buffer.
+// Eviction is time-based (oldest point outside the rolling window) with a
+// count cap as a safety backstop.  Uses `while` so an entire stale batch is
+// drained in a single push — important after a pause/resume or window change.
+function tmPush(hostId, metricKey, t, v) {
+  const maxPts  = Math.max(2, Math.ceil(tmWindowSecs / tmIntervalSecs));
+  const cutoffT = t - tmWindowSecs * 1000; // ms timestamp of the window boundary
+  if (!tmSeries[hostId])            tmSeries[hostId] = {};
+  if (!tmSeries[hostId][metricKey]) tmSeries[hostId][metricKey] = {times:[], values:[]};
+  const s = tmSeries[hostId][metricKey];
+  s.times.push(t); s.values.push(v);
+  // Primary eviction: drop any point older than the rolling window
+  while (s.times.length > 1 && s.times[0] < cutoffT) { s.times.shift(); s.values.shift(); }
+  // Secondary cap: never exceed maxPts regardless of timing anomalies
+  while (s.times.length > maxPts) { s.times.shift(); s.values.shift(); }
+}
+
+// Human-readable Y-axis label (auto-scale to K/M)
+function tmFmtVal(v) {
+  if (!isFinite(v) || v < 0) return '0';
+  if (v >= 1e6) return (v/1e6).toFixed(1)+'M';
+  if (v >= 1e3) return (v/1e3).toFixed(1)+'K';
+  if (v >= 100) return Math.round(v)+'';
+  if (v >= 10)  return v.toFixed(1);
+  return v.toFixed(2);
+}
+
+// Round up to a visually clean ceiling for the Y axis
+function tmNiceMax(v) {
+  if (v <= 0) return 1;
+  const exp  = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const f    = v / base;
+  const n    = f<=1.5?1.5 : f<=2?2 : f<=2.5?2.5 : f<=5?5 : 10;
+  return n * base;
+}
+
+// ── Canvas chart ─────────────────────────────────────────────────────────────
+
+// Draw one chart for `metric`, overlaying all selected hosts.
+// Respects tmHidden (series visibility) and tmZoom[mi] (time-range zoom).
+// Called every tick and on page re-entry; handles HiDPI automatically.
+function tmDraw(canvasId, metric, mi) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  const dpr  = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth;
+  const cssH = canvas.clientHeight;
+  if (!cssW || !cssH) return;
+
+  const bmpW = Math.round(cssW * dpr);
+  const bmpH = Math.round(cssH * dpr);
+  if (canvas.width !== bmpW || canvas.height !== bmpH) {
+    canvas.width  = bmpW;
+    canvas.height = bmpH;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const W = cssW, H = cssH;
+  const PAD = {t:30, r:14, b:36, l:58};
+  const pw  = W - PAD.l - PAD.r;
+  const ph  = H - PAD.t - PAD.b;
+
+  // Fill background
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, W, H);
+
+  // Collect full data extents (all visible series, full ring buffer)
+  let tMinAll=Infinity, tMaxAll=-Infinity;
+  const seriesData = tmSelHosts.map(host => {
+    const s = tmSeries[host.id]?.[metric.key];
+    if (!s || !s.times.length) return null;
+    if (s.times[0]               < tMinAll) tMinAll = s.times[0];
+    if (s.times[s.times.length-1] > tMaxAll) tMaxAll = s.times[s.times.length-1];
+    return s;
+  });
+
+  // Apply zoom window (may be undefined = show all)
+  const z = tmZoom[mi] || {};
+  const tMin = z.tMin != null ? z.tMin : tMinAll;
+  const tMax = z.tMax != null ? z.tMax : tMaxAll;
+
+  // Compute vMax only for the visible time slice and visible hosts
+  let vMax = 0;
+  for (const [i, host] of tmSelHosts.entries()) {
+    if (tmHidden.has(host.id)) continue;
+    const s = seriesData[i]; if (!s) continue;
+    for (let j = 0; j < s.times.length; j++) {
+      if (s.times[j] >= tMin && s.times[j] <= tMax && s.values[j] > vMax) vMax = s.values[j];
+    }
+  }
+
+  // Metric label + unit (top-left)
+  ctx.font = 'bold 11px system-ui,sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#6e7681';
+  ctx.fillText(metric.label.toUpperCase() + (metric.unit ? '  (' + metric.unit + ')' : ''), PAD.l, 15);
+
+  // Zoom indicator badge
+  if (z.tMin != null) {
+    ctx.font = '9px system-ui,sans-serif';
+    ctx.textAlign = 'right'; ctx.fillStyle = '#58a6ff';
+    ctx.fillText('🔍 dbl-click to reset', W - PAD.r, 15);
+  }
+
+  // "Waiting" placeholder
+  if (tMinAll === Infinity) {
+    ctx.fillStyle = '#484f58';
+    ctx.font = '12px system-ui,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Waiting for data…', W / 2, PAD.t + ph / 2);
+    ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
+    ctx.strokeRect(PAD.l, PAD.t, pw, ph);
+    return;
+  }
+
+  const yTop   = tmNiceMax(vMax);
+  const tRange = Math.max(tMax - tMin, 1);
+
+  // Horizontal grid lines + Y labels
+  const nY = 4;
+  for (let i = 0; i <= nY; i++) {
+    const y = PAD.t + ph * (1 - i / nY);
+    ctx.strokeStyle = '#1c2128'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + pw, y); ctx.stroke();
+    ctx.fillStyle = '#484f58';
+    ctx.font = '10px "JetBrains Mono",monospace';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(tmFmtVal(yTop * i / nY), PAD.l - 5, y);
+  }
+
+  // Vertical grid lines + X (time) labels
+  const nX = Math.min(6, Math.floor(pw / 80));
+  for (let i = 0; i <= nX; i++) {
+    const x = PAD.l + pw * i / nX;
+    if (i > 0 && i < nX) {
+      ctx.strokeStyle = '#1c2128'; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, PAD.t + ph); ctx.stroke();
+    }
+    const t = new Date(tMin + tRange * i / nX).toTimeString().slice(0, 8);
+    ctx.fillStyle = '#484f58';
+    ctx.font = '10px "JetBrains Mono",monospace';
+    ctx.textAlign = i === 0 ? 'left' : i === nX ? 'right' : 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(t, x, PAD.t + ph + 5);
+  }
+
+  // Clip series lines to the plot rectangle
+  ctx.save();
+  ctx.beginPath(); ctx.rect(PAD.l, PAD.t, pw, ph); ctx.clip();
+
+  for (const [i, host] of tmSelHosts.entries()) {
+    const s = seriesData[i];
+    const hidden = tmHidden.has(host.id);
+    if (!s || s.times.length < 2) continue;
+
+    const col = TM_COLORS[i % TM_COLORS.length];
+    ctx.strokeStyle = col;
+    ctx.lineWidth   = hidden ? 0.4 : 1.5;
+    ctx.globalAlpha = hidden ? 0.15 : 1;
+    ctx.lineJoin    = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+
+    let first = true;
+    for (let j = 0; j < s.times.length; j++) {
+      if (s.times[j] < tMin || s.times[j] > tMax) { first = true; continue; }
+      const x = PAD.l + (s.times[j] - tMin) / tRange * pw;
+      const y = PAD.t + ph * (1 - Math.min(s.values[j], yTop) / yTop);
+      first ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      first = false;
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (!hidden) {
+      // Filled dot at the latest sample within view
+      let li = s.times.length - 1;
+      while (li > 0 && s.times[li] > tMax) li--;
+      if (s.times[li] >= tMin) {
+        const lx = PAD.l + (s.times[li] - tMin) / tRange * pw;
+        const ly = PAD.t + ph * (1 - Math.min(s.values[li], yTop) / yTop);
+        ctx.beginPath(); ctx.arc(lx, ly, 3, 0, Math.PI*2);
+        ctx.fillStyle = col; ctx.fill();
+      }
+    }
+  }
+
+  // Drag-to-zoom selection overlay
+  if (z.dragX0 != null && z.dragX1 != null) {
+    const x0 = Math.min(z.dragX0, z.dragX1);
+    const x1 = Math.max(z.dragX0, z.dragX1);
+    ctx.fillStyle = 'rgba(88,166,255,0.12)';
+    ctx.fillRect(x0, PAD.t, x1-x0, ph);
+    ctx.strokeStyle = 'rgba(88,166,255,0.6)'; ctx.lineWidth = 1;
+    ctx.strokeRect(x0, PAD.t, x1-x0, ph);
+  }
+
+  ctx.restore();
+
+  // Axis frame
+  ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(PAD.l, PAD.t); ctx.lineTo(PAD.l, PAD.t + ph); ctx.lineTo(PAD.l + pw, PAD.t + ph);
+  ctx.stroke();
+
+  // Current values — stacked at top-right (dim if hidden)
+  let row = 0;
+  for (const [i, host] of tmSelHosts.entries()) {
+    const s = seriesData[i];
+    if (!s || !s.values.length) continue;
+    const hidden = tmHidden.has(host.id);
+    ctx.fillStyle = TM_COLORS[i % TM_COLORS.length];
+    ctx.globalAlpha = hidden ? 0.25 : 1;
+    ctx.font = 'bold 11px "JetBrains Mono",monospace';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    ctx.fillText(tmFmtVal(s.values[s.values.length-1]), W - PAD.r, PAD.t + row * 15);
+    ctx.globalAlpha = 1;
+    row++;
+  }
+
+  // Zoom cursor hint (shown at bottom when not zoomed)
+  if (z.tMin == null) {
+    ctx.fillStyle = '#30363d';
+    ctx.font = '9px system-ui,sans-serif';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText('drag to zoom', W - PAD.r, H - 2);
+  }
+}
+
+// Redraw every active chart canvas
+function tmRedrawAll() {
+  for (let mi = 0; mi < tmSelMetrics.length; mi++) {
+    tmDraw('tm-canvas-'+mi, tmSelMetrics[mi], mi);
+  }
+}
+
+// ── Zoom interaction ──────────────────────────────────────────────────────────
+
+// Called once after tmRenderCharts builds the canvases.
+// Attaches mousedown/mousemove/mouseup for drag-to-zoom and dblclick to reset.
+function tmAttachZoom() {
+  for (let mi = 0; mi < tmSelMetrics.length; mi++) {
+    (function(idx) {
+      const canvas = document.getElementById('tm-canvas-' + idx);
+      if (!canvas) return;
+
+      const PAD = {t:30, r:14, b:36, l:58};
+      let dragging = false;
+
+      canvas.style.cursor = 'crosshair';
+
+      canvas.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const r = canvas.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        if (x < PAD.l || x > canvas.clientWidth - PAD.r) return;
+        dragging = true;
+        if (!tmZoom[idx]) tmZoom[idx] = {};
+        tmZoom[idx].dragX0 = x;
+        tmZoom[idx].dragX1 = x;
+        // Store the current tMin/tMax at drag start for coordinate conversion
+        tmZoom[idx]._snapMin = tmZoom[idx].tMin;
+        tmZoom[idx]._snapMax = tmZoom[idx].tMax;
+        e.preventDefault();
+      });
+
+      canvas.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const r  = canvas.getBoundingClientRect();
+        const x  = Math.max(PAD.l, Math.min(canvas.clientWidth - PAD.r, e.clientX - r.left));
+        tmZoom[idx].dragX1 = x;
+        tmDraw('tm-canvas-' + idx, tmSelMetrics[idx], idx);
+      });
+
+      const finishDrag = e => {
+        if (!dragging) return;
+        dragging = false;
+        const z  = tmZoom[idx] || {};
+        const x0 = Math.min(z.dragX0, z.dragX1 ?? z.dragX0);
+        const x1 = Math.max(z.dragX0, z.dragX1 ?? z.dragX0);
+        const pw = canvas.clientWidth - PAD.l - PAD.r;
+
+        // Minimum drag: 4px — ignore tiny accidental drags
+        if (x1 - x0 > 4) {
+          // Convert pixel positions back to timestamps
+          // Use the time range that was visible when the drag started
+          let tMinSnap, tMaxSnap;
+          const allTimes = tmSelHosts.flatMap(h => tmSeries[h.id]?.[tmSelMetrics[idx].key]?.times || []);
+          tMinSnap = z._snapMin != null ? z._snapMin : (allTimes.length ? Math.min(...allTimes) : 0);
+          tMaxSnap = z._snapMax != null ? z._snapMax : (allTimes.length ? Math.max(...allTimes) : 1);
+          const tRange = tMaxSnap - tMinSnap;
+          const newMin = tMinSnap + (x0 - PAD.l) / pw * tRange;
+          const newMax = tMinSnap + (x1 - PAD.l) / pw * tRange;
+          tmZoom[idx] = {tMin: newMin, tMax: newMax};
+        } else {
+          // Tiny drag = cancelled; clear overlay but keep existing zoom
+          if (tmZoom[idx]) { delete tmZoom[idx].dragX0; delete tmZoom[idx].dragX1; }
+        }
+        tmDraw('tm-canvas-' + idx, tmSelMetrics[idx], idx);
+      };
+      canvas.addEventListener('mouseup',    finishDrag);
+      canvas.addEventListener('mouseleave', finishDrag);
+
+      canvas.addEventListener('dblclick', () => {
+        tmZoom[idx] = {};
+        tmDraw('tm-canvas-' + idx, tmSelMetrics[idx], idx);
+      });
+    })(mi);
+  }
+}
+
+// ── Polling tick ─────────────────────────────────────────────────────────────
+
+// One polling round: fetch only the required serverStatus sections for all
+// selected hosts in parallel, compute counter deltas, push into ring buffers,
+// then redraw all canvases.
+// Uses /api/server/metrics (not /api/server/status) so the server suppresses
+// every heavy section (wiredTiger, repl, tcmalloc, locks, metrics, …) that
+// we don't need — keeping each response to ~2–4 KB instead of ~300–500 KB.
+async function tmTick() {
+  if (tmInFlight) return; // skip if previous round still in progress
+  tmInFlight = true;
+  const gen = tmGen;
+  const sections = tmSections(tmSelMetrics); // e.g. "opcounters,connections"
+  try {
+    const now = Date.now();
+    await Promise.all(tmSelHosts.map(async host => {
+      try {
+        const ss = await api('/api/server/metrics', {uri: host.uri, sections});
+        if (gen !== tmGen || ss.error) return; // stale or failed
+        for (const m of tmSelMetrics) {
+          const raw = tmExtract(ss, m);
+          if (raw === null) continue;
+          if (m.type === 'ctr') {
+            // Counter: compute per-second rate against previous sample
+            const prev = tmPrev[host.id]?.[m.key];
+            if (prev && prev.time < now) {
+              const dt   = (now - prev.time) / 1000;
+              const rate = Math.max(0, (raw - prev.value) / dt) * (m.scale || 1);
+              tmPush(host.id, m.key, now, rate);
+            }
+            if (!tmPrev[host.id]) tmPrev[host.id] = {};
+            tmPrev[host.id][m.key] = {value: raw, time: now};
+          } else {
+            // Gauge: use directly
+            tmPush(host.id, m.key, now, raw * (m.scale || 1));
+          }
+        }
+      } catch(_) {}
+    }));
+    if (gen === tmGen) tmRedrawAll();
+  } finally { tmInFlight = false; }
+}
+
+// ── Control functions ─────────────────────────────────────────────────────────
+
+// Build the selected metrics/hosts from the DOM config form and begin polling
+function tmStart() {
+  const checked = [...document.querySelectorAll('.tm-metric-cb:checked')].map(el => el.value);
+  const selM = TM_METRICS.filter(m => checked.includes(m.key));
+  if (!selM.length) return toast('Select at least one metric','error');
+
+  const selH = [...document.querySelectorAll('.tm-host-cb:checked')].map(el =>
+    ({id: el.value, uri: el.dataset.uri, label: el.dataset.label}));
+  if (!selH.length) return toast('Select at least one host','error');
+
+  tmWindowSecs   = parseInt(document.getElementById('tm-window')?.value   || '3600');
+  tmIntervalSecs = parseFloat(document.getElementById('tm-interval')?.value || '1');
+
+  tmSelMetrics = selM;
+  tmSelHosts   = selH;
+  tmRunning    = true;
+  tmGen++;
+  // Always start with an empty ring-buffer so stale data from a previous
+  // session (possibly recorded at a different window size) never bleeds into
+  // the new one.  tmHidden and tmZoom are also reset for a clean chart.
+  tmSeries  = {}; tmPrev    = {};
+  tmHidden  = new Set(); tmZoom = {};
+  tmInFlight = false;
+
+  tmRenderCharts();
+  tmIntervalId = setInterval(() => tmTick(), Math.round(tmIntervalSecs * 1000));
+  tmTick(); // immediate first round
+}
+
+// Pause polling (called from Stop button or on page navigation)
+function tmStop() {
+  clearInterval(tmIntervalId); tmIntervalId = null; tmRunning = false;
+  // Reset the in-flight flag so a future Resume isn't blocked by a tick that
+  // was abandoned mid-await when the interval was cleared.
+  tmInFlight = false;
+  const ind = document.getElementById('tm-ind');
+  if (ind) ind.outerHTML = `<span id="tm-ind" class="text-xs px-2 py-0.5 rounded-full border border-gray-700 text-gray-500">PAUSED</span>`;
+  const btn = document.getElementById('tm-toggle-btn');
+  if (btn) { btn.textContent = '▶ Resume'; btn.onclick = tmResume; }
+}
+
+// Resume polling using the existing selection (no config re-read)
+function tmResume() {
+  if (!tmSelMetrics.length || !tmSelHosts.length) return;
+  tmRunning = true; tmGen++;
+  // Ensure any abandoned in-flight tick can't block the first new tick.
+  tmInFlight = false;
+  // Discard stale counter baselines — the pause gap would produce a misleading
+  // rate spike (or near-zero rate for long pauses) on the first tick.
+  // The first tick after resume simply records a fresh baseline and skips
+  // pushing a value for counter metrics; gauges are unaffected.
+  tmPrev = {};
+  const ind = document.getElementById('tm-ind');
+  if (ind) ind.outerHTML = tmLiveIndicatorHtml();
+  const btn = document.getElementById('tm-toggle-btn');
+  if (btn) { btn.textContent = '⏹ Stop'; btn.onclick = tmStop; }
+  tmIntervalId = setInterval(() => tmTick(), Math.round(tmIntervalSecs * 1000));
+  tmTick();
+}
+
+// Clear all data and return to the setup screen
+function tmClear() {
+  clearInterval(tmIntervalId); tmIntervalId = null; tmRunning = false; tmGen++;
+  tmSeries={}; tmPrev={}; tmSelMetrics=[]; tmSelHosts=[]; tmHidden=new Set(); tmZoom={};
+  trafficMonitor();
+}
+
+function tmLiveIndicatorHtml() {
+  return `<span id="tm-ind" class="flex items-center gap-1.5 text-xs font-bold text-mg px-2 py-0.5 rounded-full" style="background:rgba(0,237,100,.08);border:1px solid rgba(0,237,100,.25)">
+    <span class="tm-live-dot" style="width:6px;height:6px;border-radius:50%;background:#00ed64;display:inline-block;flex-shrink:0"></span>LIVE
+  </span>`;
+}
+
+// Render the live charts area (called by tmStart and when navigating back while data exists)
+function tmRenderCharts() {
+  const chartCards = tmSelMetrics.map((m, mi) =>
+    `<div class="card" style="overflow:hidden;position:relative">
+      <canvas id="tm-canvas-${mi}" style="display:block;width:100%;height:220px;cursor:crosshair"></canvas>
+    </div>`).join('');
+
+  // Clickable legend chips — click toggles visibility of that host's series
+  const legend = tmSelHosts.map((h, i) => {
+    const col = TM_COLORS[i % TM_COLORS.length];
+    return `<button onclick="tmToggleHost('${h.id}')" id="tm-leg-${i}"
+        title="Click to show/hide"
+        class="flex items-center gap-1.5 mono text-xs px-2 py-0.5 rounded transition-all select-none"
+        style="border:1px solid ${col}40;background:${col}12;color:#cdd5de">
+      <span id="tm-dot-${i}" style="width:9px;height:9px;border-radius:50%;background:${col};flex-shrink:0;display:inline-block"></span>
+      ${esc(h.label)}
+    </button>`;
+  }).join('');
+
+  const winLabel = tmWindowSecs>=3600 ? (tmWindowSecs/3600)+'h' : (tmWindowSecs/60)+'m';
+
+  setMain(`<div class="space-y-4">
+    ${pageHeader('📈','Live Traffic Monitor','',`
+      ${tmLiveIndicatorHtml()}
+      <button id="tm-toggle-btn" onclick="tmStop()" class="btn-sm">⏹ Stop</button>
+      <button onclick="tmClear()" class="btn-sm">✕ Clear</button>
+    `)}
+    <div class="card">
+      <div class="p-3 flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap gap-2" id="tm-legend">${legend}</div>
+        <div class="ml-auto flex items-center gap-5 text-xs text-gray-500">
+          <span>Window&nbsp;<span class="text-gray-300 mono">${winLabel}</span></span>
+          <span>Interval&nbsp;<span class="text-gray-300 mono">${tmIntervalSecs}s</span></span>
+          <span>Max&nbsp;pts&nbsp;<span class="text-gray-300 mono">${Math.ceil(tmWindowSecs/tmIntervalSecs).toLocaleString()}</span></span>
+          <span id="tm-clock" class="mono text-mg text-xs"></span>
+        </div>
+      </div>
+    </div>
+    ${chartCards}
+  </div>`);
+
+  // Tick the wall-clock display every half-second
+  (function clockTick(){
+    const el=document.getElementById('tm-clock');
+    if(el){el.textContent=new Date().toTimeString().slice(0,8);setTimeout(clockTick,500);}
+  })();
+
+  // Give the browser one frame to lay out the canvases, then draw + attach zoom
+  setTimeout(() => { tmRedrawAll(); tmAttachZoom(); }, 60);
+}
+
+// Toggle a host series on/off from the legend
+function tmToggleHost(hostId) {
+  if (tmHidden.has(hostId)) {
+    tmHidden.delete(hostId);
+  } else {
+    // Don't allow hiding all hosts at once
+    const visibleAfter = tmSelHosts.filter(h => h.id !== hostId && !tmHidden.has(h.id));
+    if (visibleAfter.length === 0) return;
+    tmHidden.add(hostId);
+  }
+  // Update legend chip appearance
+  tmSelHosts.forEach((h, i) => {
+    const btn = document.getElementById('tm-leg-'+i);
+    const dot = document.getElementById('tm-dot-'+i);
+    if (!btn) return;
+    const col = TM_COLORS[i % TM_COLORS.length];
+    const hidden = tmHidden.has(h.id);
+    btn.style.opacity = hidden ? '0.35' : '1';
+    btn.style.textDecoration = hidden ? 'line-through' : '';
+    if (dot) dot.style.background = hidden ? '#484f58' : col;
+  });
+  tmRedrawAll();
+}
+
+// ── Page entry point ──────────────────────────────────────────────────────────
+
+// Select only hosts whose role contains "primary" (case-insensitive).
+// Used by the "Primaries" button in the host picker.
+function tmSelectPrimaries() {
+  document.querySelectorAll('.tm-host-cb').forEach(c => {
+    c.checked = (c.dataset.role || '').toLowerCase().includes('primary');
+  });
+}
+
+async function trafficMonitor() {
+  // If we have an active or paused session, restore the chart view
+  if (tmSelMetrics.length && tmSelHosts.length) {
+    tmRenderCharts();
+    if (!tmRunning) {
+      // Paused (navigated away): show paused state without restarting
+      const ind = document.getElementById('tm-ind');
+      if (ind) ind.outerHTML = `<span id="tm-ind" class="text-xs px-2 py-0.5 rounded-full border border-gray-700 text-gray-500">PAUSED</span>`;
+      const btn = document.getElementById('tm-toggle-btn');
+      if (btn) { btn.textContent = '▶ Resume'; btn.onclick = tmResume; }
+    }
+    return;
+  }
+
+  // ── Setup form ──────────────────────────────────────────────────────────────
+  // Build host list: prefer individual mongod nodes (directConnection),
+  // fall back to RS-level nodes if member enumeration hasn't completed yet.
+  const indivHosts = memberNodes
+    .filter(m => m.role !== 'arbiter')
+    .map((m, i) => { const host=m.id.split('/')[1]||m.id; const label=m.rs?`${m.rs}/${host}`:host; return {id:m.id, uri:injectCredsIntoUri(m.uri), label, role:m.role}; });
+
+  const rsHosts = indivHosts.length === 0
+    ? rsNodesList().map(n => ({id:n.id, uri:injectCredsIntoUri(n.uri), label:n.id, role:n.role}))
+    : [];
+
+  const mongosHosts = mongosNodesList().map(n =>
+    ({id:n.id, uri:injectCredsIntoUri(n.uri), label:n.id, role:'mongos'}));
+
+  const fallback = (indivHosts.length + rsHosts.length + mongosHosts.length) === 0
+    ? [{id:'default', uri, label:getHostFromUri(uri)||'connected', role:'primary'}]
+    : [];
+
+  const allHosts = [...indivHosts, ...rsHosts, ...mongosHosts, ...fallback];
+
+  const metricCbs = TM_METRICS.map(m =>
+    `<label class="flex items-center gap-2 cursor-pointer py-0.5 px-2 rounded hover:bg-panel-hover select-none">
+      <input type="checkbox" class="tm-metric-cb" value="${m.key}" style="accent-color:#00ed64"
+        ${['ins','qry','upd','aconn'].includes(m.key) ? 'checked' : ''}>
+      <span class="text-xs text-gray-300">${esc(m.label)}</span>
+      ${m.unit ? `<span class="text-xs text-gray-600 mono ml-auto">${esc(m.unit)}</span>` : ''}
+    </label>`).join('');
+
+  // Determine smart defaults:
+  //   sharded cluster  → check all mongos routers
+  //   replica set only → check the primary (first host whose role contains 'primary')
+  //   fallback         → check everything
+  const hasMongos  = mongosHosts.length > 0;
+  const defaultIds = hasMongos
+    ? new Set(mongosHosts.map(h => h.id))
+    : (() => {
+        const pri = allHosts.find(h => h.role && h.role.toLowerCase().includes('primary'));
+        return pri ? new Set([pri.id]) : new Set(allHosts.map(h => h.id));
+      })();
+
+  const hostCbs = allHosts.map((h, i) =>
+    `<label class="flex items-center gap-2 cursor-pointer py-1 px-2 rounded hover:bg-panel-hover border border-transparent hover:border-panel-border select-none">
+      <input type="checkbox" class="tm-host-cb" value="${esc(h.id)}"
+        data-uri="${esc(h.uri)}" data-label="${esc(h.label)}" data-role="${esc(h.role)}"
+        style="accent-color:#00ed64" ${defaultIds.has(h.id) ? 'checked' : ''}>
+      <span style="width:9px;height:9px;border-radius:50%;background:${TM_COLORS[i%TM_COLORS.length]};flex-shrink:0;display:inline-block"></span>
+      <span class="mono text-xs text-gray-300 truncate">${esc(h.label)}</span>
+      <span class="mb b-${esc(h.role)} ml-auto shrink-0" style="font-size:.55rem">${esc(h.role)}</span>
+    </label>`).join('');
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('📈','Live Traffic Monitor','In-memory time series · no external dependencies','')}
+
+    <div class="grid gap-5" style="grid-template-columns:1fr 1fr 1.1fr">
+
+      <!-- Metric picker -->
+      <div class="card">
+        <div class="card-header">📊 Metrics
+          <button onclick="[...document.querySelectorAll('.tm-metric-cb')].forEach(c=>c.checked=true)" class="btn-xs ml-auto">All</button>
+          <button onclick="[...document.querySelectorAll('.tm-metric-cb')].forEach(c=>c.checked=false)" class="btn-xs">None</button>
+        </div>
+        <div class="p-2 space-y-0">${metricCbs}</div>
+      </div>
+
+      <!-- Host picker -->
+      <div class="card">
+        <div class="card-header">🖥 Hosts
+          <button onclick="[...document.querySelectorAll('.tm-host-cb')].forEach(c=>c.checked=true)"  class="btn-xs ml-auto">All</button>
+          <button onclick="[...document.querySelectorAll('.tm-host-cb')].forEach(c=>c.checked=false)" class="btn-xs">None</button>
+          <button onclick="tmSelectPrimaries()" class="btn-xs">Primaries</button>
+        </div>
+        <div class="p-2 space-y-0.5">
+          ${hostCbs || '<div class="text-gray-600 text-xs p-2">No individual hosts resolved yet — try again after connecting.</div>'}
+        </div>
+      </div>
+
+      <!-- Settings + launch -->
+      <div class="card">
+        <div class="card-header">⚙️ Settings</div>
+        <div class="p-4 space-y-4">
+
+          <div>
+            <label class="text-xs text-gray-500 font-semibold block mb-1">Time window (rolling)</label>
+            <select id="tm-window" onchange="tmUpdatePreview()" class="fi w-full text-xs">
+              <option value="300">5 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600" selected>1 hour</option>
+              <option value="7200">2 hours</option>
+              <option value="14400">4 hours</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="text-xs text-gray-500 font-semibold block mb-1">Resolution (poll interval)</label>
+            <select id="tm-interval" onchange="tmUpdatePreview()" class="fi w-full text-xs">
+              <option value="1" selected>1 second</option>
+              <option value="2">2 seconds</option>
+              <option value="5">5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+            </select>
+          </div>
+
+          <div class="bg-panel-inner border border-panel-border rounded p-3 text-xs space-y-1.5">
+            <div class="flex justify-between">
+              <span class="text-gray-500">Max samples / series</span>
+              <span class="mono text-gray-300" id="tm-maxpts">3 600</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-500">Approx. memory / series</span>
+              <span class="mono text-gray-300" id="tm-mem">~58 KB</span>
+            </div>
+            <div class="text-gray-600 leading-relaxed mt-1">
+              Oldest samples are evicted automatically once the window fills. All data lives in browser memory only and is cleared on disconnect.
+            </div>
+          </div>
+
+          <button onclick="tmStart()" class="bg-mg text-black font-bold text-sm w-full py-2 rounded hover:bg-mg-dark transition-colors">▶ Start monitoring</button>
+        </div>
+      </div>
+
+    </div>
+  </div>`);
+}
+
+// Update the max-pts / estimated memory preview in the settings card
+function tmUpdatePreview() {
+  const w   = parseInt(document.getElementById('tm-window')?.value   || '3600');
+  const ivl = parseFloat(document.getElementById('tm-interval')?.value || '1');
+  const pts = Math.ceil(w / ivl);
+  const memKB = Math.round(pts * 16 / 1024); // two Float64 (8B each) per point
+  const el = document.getElementById('tm-maxpts'); if (el) el.textContent = pts.toLocaleString();
+  const em = document.getElementById('tm-mem');    if (em) em.textContent = `~${memKB < 1024 ? memKB+' KB' : (memKB/1024).toFixed(1)+' MB'}`;
+}
 
 // ═══════════════════════════════════════════════════════════ WIREDTIGER STATS
 let wtTargetURI='';
