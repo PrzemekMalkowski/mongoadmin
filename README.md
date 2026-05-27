@@ -41,6 +41,7 @@ Connect to any standalone instance, replica set, or sharded cluster with a singl
 | **Network Compression** | Per-compressor (snappy/zstd/zlib) bytes-in/out with utilisation bars |
 | **WiredTiger Stats** | Full WiredTiger, tcmalloc, and memory section from `serverStatus` |
 | **Flow Control** | Enable/disable flow control and set target lag per mongod |
+| **Live Traffic Monitor** | Real-time, multi-host charts for op counters (inserts/queries/updates/deletes/commands/getmores), connections, network throughput, resident memory, and lock queue depth — configurable polling interval (1–30 s) and rolling time window (5 min – 4 h); uses the lightweight `/api/server/metrics` endpoint so each poll fetches only the requested `serverStatus` sections (~2–4 KB instead of ~300–500 KB); data stays in browser memory only |
 | **Current Ops** | Live operation list with runtime, plan summary, lock wait, app name — expand any row for full command and metadata |
 | **Kill Operations** | Single-op kill or batch kill with filters (op type, namespace, app name, minimum runtime) |
 | **Slow Query Profiler** | Get/set profiling level per database, browse `system.profile` with filters |
@@ -126,6 +127,9 @@ go build -o mongoadmin .
 
 # Enable verbose server-side debug logging
 ./mongoadmin --debug
+
+# Read-only mode — all write/mutating operations are disabled in the UI and blocked at the API level
+./mongoadmin --view-only
 ```
 
 Open your browser at `http://localhost:8787` (or `https://localhost:8787` if TLS is enabled).
@@ -139,6 +143,7 @@ Open your browser at `http://localhost:8787` (or `https://localhost:8787` if TLS
 | `--cert` | `mongoadmin.crt` | Path to TLS certificate file |
 | `--key` | `mongoadmin.key` | Path to TLS private key file |
 | `--debug` | `false` | Enable server-side debug logging |
+| `--view-only` | `false` | Disable all write/mutating operations — destructive UI controls are hidden and the API returns `403` for any write attempt |
 | `--version` | — | Print version and exit |
 
 ---
@@ -208,7 +213,8 @@ All endpoints accept `POST` requests with `application/x-www-form-urlencoded` bo
 
 | Endpoint | Key Parameters | Description |
 |----------|---------------|-------------|
-| `POST /api/server/status` | `uri` | `db.serverStatus()` |
+| `POST /api/server/status` | `uri` | `db.serverStatus()` — full output |
+| `POST /api/server/metrics` | `uri`, `sections` | Lightweight partial `serverStatus` — pass a comma-separated list of top-level sections (e.g. `opcounters,connections,network`) and the server suppresses all other expensive sections; used by the Live Traffic Monitor poller |
 | `POST /api/server/hostinfo` | `uri` | `hostInfo` + memory from `serverStatus` |
 | `POST /api/server/top-commands` | `uri` | Top 25 commands by call count |
 | `POST /api/server/getparam` | `uri`, `param` | `getParameter` for a named parameter |
@@ -267,6 +273,7 @@ MongoAdmin is designed as an **internal / ops tool**. Before exposing it:
 - **Do not expose MongoAdmin on a public interface** without authentication in front of it (e.g. reverse proxy with HTTP Basic Auth, VPN, or SSH tunnel).
 - Enable TLS (`--tls`) whenever the tool is accessed over an untrusted network.
 - MongoAdmin does not implement its own login system — it relies on MongoDB's built-in access control via the connection URI.
+- Use `--view-only` when granting access to operators or teams who need visibility into the cluster but must not be able to alter it. In this mode all destructive UI controls are hidden and every mutating API endpoint returns `403 Forbidden` regardless of the MongoDB user's own privileges.
 - All destructive operations (kill op, drop index, delete user/role, stop balancer) require explicit user action in the UI.
 
 ---
