@@ -7,7 +7,11 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-4.2%2B-00ED64?logo=mongodb)](https://www.mongodb.com/)
 
 MongoAdmin is a zero-dependency, self-hosted MongoDB administration interface written in Go.  
-Connect to any standalone instance, replica set, or sharded cluster with a single URI and get an instant overview of your cluster health, operations, data distribution, users, and more — all through a clean dark-mode UI.
+Connect to any standalone instance, replica set, or sharded cluster with a single URI and get an instant overview of your cluster health, operations, data distribution, users, and more — all through a clean dark-mode UI.  
+The tool is very lightweight in terms of resource requirements and size (binary around 16MB), so should be ideal as a **sidecar container** to your MongoDB cluster deployment.  
+No need for any agents, or SSH access, MongoAdmin connects directly to all MongoDB instances it is able to find through the router (mongos) or replica set member connection string.  
+It is meant to fill the gap in DBA-oriented GUI tools, focused on replication, sharding and general quick cluster overview and simple administrative operations.   
+MongoAdmin is **not** intended for viewing or editing data collections, there are plenty of other tools available for that. It is also not a long term monitoring or alerting solution. For that, I strongly recommend [Percona Monitoring and Management (PMM)](https://docs.percona.com/percona-monitoring-and-management/3/) for the best monitoring experience.
 
 > [!WARNING]
 > **MongoAdmin is currently in beta.** It is not recommended for production use.
@@ -79,18 +83,28 @@ Connect to any standalone instance, replica set, or sharded cluster with a singl
   <tr>
     <td><img src="docs/screenshots/db_stats.png" alt="Database Stats" width="280"/></td>
     <td><img src="docs/screenshots/col_stats.png" alt="Collection Stats" width="280"/></td>
+    <td><img src="docs/screenshots/sharding_status.png" alt="Sharding Status" width="280"/></td>
   </tr>
   <tr>
     <td align="center"><em>Database Stats</em></td>
     <td align="center"><em>Collection Stats</em></td>
+    <td align="center"><em>Sharding Status</em></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/slow_queries.png" alt="Slow Queries" width="280"/></td>
     <td><img src="docs/screenshots/log_view.png" alt="Log View" width="280"/></td>
+    <td><img src="docs/screenshots/live_traffic.png" alt="Live Traffic" width="280"/></td>
   </tr>
   <tr>
     <td align="center"><em>Slow Queries</em></td>
     <td align="center"><em>Log View</em></td>
+    <td align="center"><em>Live Traffic</em></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/users_roles.png" alt="Users & Roles" width="280"/></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Users & Roles</em></td>
   </tr>
 </table>
 ---
