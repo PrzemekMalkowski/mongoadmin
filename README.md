@@ -1,6 +1,6 @@
 # 🍃 MongoAdmin
 
-> A lightweight, single-binary web admin panel for MongoDB — replica sets and sharded clusters included.
+> A lightweight, single-binary web admin panel for MongoDB DBAs — replica sets and sharded clusters auto-discovery included.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?logo=go)](https://go.dev/)
@@ -17,6 +17,48 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
 > **MongoAdmin is currently in beta.** It is not recommended for production use.
 > Expect breaking changes between versions. Always test in a safe environment before
 > connecting to any live data. Use at your own risk.
+---
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td><a href="docs/screenshots/rs_status.png"><img src="docs/screenshots/rs_status.png" alt="Replica Set Status" width="280"/></a></td>
+    <td><a href="docs/screenshots/server_status.png"><img src="docs/screenshots/server_status.png" alt="Server Status" width="280"/></a></td>
+    <td><a href="docs/screenshots/ops.png"><img src="docs/screenshots/ops.png" alt="Operations" width="280"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Replica Set Status</em></td>
+    <td align="center"><em>Server Status</em></td>
+    <td align="center"><em>Operations</em></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/db_stats.png"><img src="docs/screenshots/db_stats.png" alt="Database Stats" width="280"/></a></td>
+    <td><a href="docs/screenshots/col_stats.png"><img src="docs/screenshots/col_stats.png" alt="Collection Stats" width="280"/></a></td>
+    <td><a href="docs/screenshots/sharding_status.png"><img src="docs/screenshots/sharding_status.png" alt="Sharding Status" width="280"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Database Stats</em></td>
+    <td align="center"><em>Collection Stats</em></td>
+    <td align="center"><em>Sharding Status</em></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/slow_queries.png"><img src="docs/screenshots/slow_queries.png" alt="Slow Queries" width="280"/></a></td>
+    <td><a href="docs/screenshots/log_view.png"><img src="docs/screenshots/log_view.png" alt="Log View" width="280"/></a></td>
+    <td><a href="docs/screenshots/live_traffic.png"><img src="docs/screenshots/live_traffic.png" alt="Live Traffic" width="280"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Slow Queries</em></td>
+    <td align="center"><em>Log View</em></td>
+    <td align="center"><em>Live Traffic</em></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/users_roles.png"><img src="docs/screenshots/users_roles.png" alt="Users & Roles" width="280"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Users &amp; Roles</em></td>
+  </tr>
+</table>
+
 ---
 
 ## ✨ Features
@@ -65,48 +107,6 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
 | **Per-Shard Auth** | Prompt for shard-specific credentials when a shard has different auth from the mongos |
 | **Password Masking** | Connection URIs are masked in the browser UI — passwords are never displayed |
 
----
-
-## 📸 Screenshots
-
-<table>
-  <tr>
-    <td><img src="docs/screenshots/rs_status.png" alt="Replica Set Status" width="280"/></td>
-    <td><img src="docs/screenshots/server_status.png" alt="Server Status" width="280"/></td>
-    <td><img src="docs/screenshots/ops.png" alt="Operations" width="280"/></td>
-  </tr>
-  <tr>
-    <td align="center"><em>Replica Set Status</em></td>
-    <td align="center"><em>Server Status</em></td>
-    <td align="center"><em>Operations</em></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/db_stats.png" alt="Database Stats" width="280"/></td>
-    <td><img src="docs/screenshots/col_stats.png" alt="Collection Stats" width="280"/></td>
-    <td><img src="docs/screenshots/sharding_status.png" alt="Sharding Status" width="280"/></td>
-  </tr>
-  <tr>
-    <td align="center"><em>Database Stats</em></td>
-    <td align="center"><em>Collection Stats</em></td>
-    <td align="center"><em>Sharding Status</em></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/slow_queries.png" alt="Slow Queries" width="280"/></td>
-    <td><img src="docs/screenshots/log_view.png" alt="Log View" width="280"/></td>
-    <td><img src="docs/screenshots/live_traffic.png" alt="Live Traffic" width="280"/></td>
-  </tr>
-  <tr>
-    <td align="center"><em>Slow Queries</em></td>
-    <td align="center"><em>Log View</em></td>
-    <td align="center"><em>Live Traffic</em></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/users_roles.png" alt="Users & Roles" width="280"/></td>
-  </tr>
-  <tr>
-    <td align="center"><em>Users & Roles</em></td>
-  </tr>
-</table>
 ---
 
 ## 🚀 Getting Started
