@@ -43,7 +43,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const version = "0.3.2"
+const version = "0.3.3"
 
 var debugMode bool
 var viewOnly  bool
@@ -335,6 +335,111 @@ type NodeInfo struct {
 	URI  string `json:"uri"`  // connection URI
 }
 
+// extractPort returns the port number from a "host:port" string.
+// Returns "27017" as default if no port is found.
+func extractPort(hostport string) string {
+	// Strip any leading mongodb:// and credentials
+	s := hostport
+	if idx := strings.Index(s, "://"); idx >= 0 {
+		s = s[idx+3:]
+	}
+	if atIdx := strings.Index(s, "@"); atIdx >= 0 {
+		s = s[atIdx+1:]
+	}
+	// Strip query string / path
+	if slashIdx := strings.Index(s, "/"); slashIdx >= 0 {
+		s = s[:slashIdx]
+	}
+	if colonIdx := strings.LastIndex(s, ":"); colonIdx >= 0 {
+		return s[colonIdx+1:]
+	}
+	return "27017"
+}
+
+// probeMongosReachable attempts a connect + ping with a hard deadline.
+// It never touches the shared client cache — it is fire-and-forget probing only.
+func probeMongosReachable(uri string, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	opts := options.Client().
+		ApplyURI(uri).
+		SetServerSelectionTimeout(timeout).
+		SetConnectTimeout(timeout)
+	c, err := mongo.Connect(ctx, opts)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = c.Disconnect(context.Background()) }()
+	return c.Ping(ctx, nil) == nil
+}
+
+// discoverMongosIPs runs a $currentOp aggregation on the config-server primary
+// to collect the IP addresses of all currently-connected mongos processes.
+// This is the fallback when config.mongos contains hostnames that are not
+// reachable from the machine running MongoAdmin.
+func discoverMongosIPs(cfgURI string) ([]string, error) {
+	c, err := getClient(cfgURI)
+	if err != nil {
+		return nil, fmt.Errorf("discoverMongosIPs: cannot connect to config server: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// The TaskExecutorPool connections are the internal mongos → configsvr links.
+	pipeline := mongo.Pipeline{
+		{
+			{Key: "$currentOp", Value: bson.D{
+				{Key: "allUsers", Value: true},
+				{Key: "idleConnections", Value: true},
+			}},
+		},
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "clientMetadata.driver.name", Value: primitive.Regex{
+					Pattern: `^NetworkInterfaceTL-TaskExecutorPool`,
+					Options: "",
+				}},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "_id", Value: 0},
+				{Key: "ip", Value: bson.D{
+					{Key: "$arrayElemAt", Value: bson.A{
+						bson.D{{Key: "$split", Value: bson.A{"$client", ":"}}},
+						0,
+					}},
+				}},
+			}},
+		},
+		{
+			{Key: "$group", Value: bson.D{{Key: "_id", Value: "$ip"}}},
+		},
+	}
+
+	cursor, err := c.Database("admin").Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("discoverMongosIPs: aggregation failed: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var ips []string
+	for cursor.Next(ctx) {
+		var doc bson.D
+		if err2 := cursor.Decode(&doc); err2 != nil {
+			continue
+		}
+		for _, e := range doc {
+			if e.Key == "_id" {
+				if ip, ok := e.Value.(string); ok && ip != "" {
+					ips = append(ips, ip)
+				}
+			}
+		}
+	}
+	return ips, cursor.Err()
+}
+
 func parseRSUri(host string) (string, string) {
 	if idx := strings.Index(host, "/"); idx >= 0 {
 		rsName := host[:idx]
@@ -406,6 +511,19 @@ func discoverTopology(mongosURI string) ([]NodeInfo, error) {
 	}
 
 	// 3. Mongos instances — from config.mongos collection
+	//
+	// Some environments advertise hostnames that are not resolvable from the
+	// machine running MongoAdmin (e.g. internal Kubernetes pod names).  We
+	// therefore probe each hostname with a 1-second hard timeout and, for any
+	// that fail, fall back to IP-address discovery via a $currentOp aggregation
+	// executed on the config-server primary.
+
+	type mongosCandidate struct {
+		id   string
+		host string // "hostname:port" as stored in config.mongos._id
+	}
+	var candidates []mongosCandidate
+
 	if mRes, err2 := runCmd(mongosURI, "config", bson.D{
 		{Key: "find", Value: "mongos"},
 		{Key: "limit", Value: 50},
@@ -417,12 +535,97 @@ func discoverTopology(mongosURI string) ([]NodeInfo, error) {
 					continue
 				}
 				host, _ := m["_id"].(string)
-				nodes = append(nodes, NodeInfo{
-					ID:   fmt.Sprintf("mongos-%d", i),
-					Role: "mongos",
-					URI:  "mongodb://" + host,
+				candidates = append(candidates, mongosCandidate{
+					id:   fmt.Sprintf("mongos-%d", i),
+					host: host,
 				})
 			}
+		}
+	}
+
+	// Probe all candidate mongos concurrently with a 1-second deadline.
+	type probeResult struct {
+		candidate mongosCandidate
+		reachable bool
+	}
+	probeResults := make([]probeResult, len(candidates))
+	var probeWG sync.WaitGroup
+	for i, cand := range candidates {
+		probeWG.Add(1)
+		go func(i int, cand mongosCandidate) {
+			defer probeWG.Done()
+			probeURI := injectCredentials("mongodb://"+cand.host, username, password)
+			ok := probeMongosReachable(probeURI, 1*time.Second)
+			if !ok {
+				debugLog("mongos %s unreachable via hostname — will attempt IP fallback", cand.host)
+			}
+			probeResults[i] = probeResult{candidate: cand, reachable: ok}
+		}(i, cand)
+	}
+	probeWG.Wait()
+
+	// Partition into reachable (add immediately) and failed (need IP fallback).
+	var failedCandidates []mongosCandidate
+	failedPortSet := map[string]bool{}
+	var failedPorts []string
+
+	for _, pr := range probeResults {
+		if pr.reachable {
+			nodes = append(nodes, NodeInfo{
+				ID:   pr.candidate.id,
+				Role: "mongos",
+				URI:  injectCredentials("mongodb://"+pr.candidate.host, username, password),
+			})
+		} else {
+			failedCandidates = append(failedCandidates, pr.candidate)
+			p := extractPort(pr.candidate.host)
+			if !failedPortSet[p] {
+				failedPortSet[p] = true
+				failedPorts = append(failedPorts, p)
+			}
+		}
+	}
+
+	// IP-fallback: if any hostname was unreachable AND we have the config-server
+	// URI, ask the config primary which IPs are currently connected as mongos.
+	if len(failedCandidates) > 0 && cfgURI != "" {
+		fallbackIPs, ipErr := discoverMongosIPs(cfgURI)
+		if ipErr != nil {
+			debugLog("mongos IP fallback aggregation error: %v", ipErr)
+		} else {
+			debugLog("mongos IP fallback: discovered %d IP(s): %v", len(fallbackIPs), fallbackIPs)
+		}
+
+		// For each discovered IP, try every port we saw in the failed set.
+		// The first port that connects is used; a working IP:port replaces one
+		// failed hostname entry (matched by position to keep IDs stable).
+		ipNodeIdx := 0
+		for _, ip := range fallbackIPs {
+			for _, port := range failedPorts {
+				candidateURI := injectCredentials(
+					"mongodb://"+ip+":"+port,
+					username, password,
+				)
+				if probeMongosReachable(candidateURI, 1*time.Second) {
+					id := fmt.Sprintf("mongos-%d", ipNodeIdx)
+					if ipNodeIdx < len(failedCandidates) {
+						// Reuse the original sequential ID so the UI stays stable.
+						id = failedCandidates[ipNodeIdx].id
+					}
+					debugLog("mongos IP fallback: using %s:%s (id=%s)", ip, port, id)
+					nodes = append(nodes, NodeInfo{
+						ID:   id,
+						Role: "mongos",
+						URI:  candidateURI,
+					})
+					ipNodeIdx++
+					break // found a working port for this IP; move to next IP
+				}
+			}
+		}
+
+		if ipNodeIdx == 0 && len(fallbackIPs) > 0 {
+			debugLog("mongos IP fallback: IPs discovered but none responded on ports %v", failedPorts)
 		}
 	}
 
