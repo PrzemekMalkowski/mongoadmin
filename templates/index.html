@@ -346,6 +346,38 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
   </div>
 </div>
 
+<!-- EXPLAIN MODAL -->
+<div id="explainModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[900px] max-w-[95vw] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0 flex-wrap">
+      <span>🔬 Query Explain</span>
+      <span class="mb b-SECONDARY text-xs" id="explainOp"></span>
+      <code class="text-gray-500 text-xs mono" id="explainNs"></code>
+      <div class="flex items-center gap-2 ml-auto">
+        <span class="text-xs text-gray-500">Verbosity:</span>
+        <select id="explainVerbosity" onchange="reRunExplain()" class="fi text-xs">
+          <option value="queryPlanner">queryPlanner</option>
+          <option value="executionStats" selected>executionStats</option>
+          <option value="allPlansExecution">allPlansExecution</option>
+        </select>
+        <button onclick="closeExplainModal()" class="text-gray-500 hover:text-gray-200 text-lg leading-none px-1">✕</button>
+      </div>
+    </div>
+    <div class="p-5 space-y-4 overflow-y-auto flex-1">
+      <div id="explainError" class="hidden bg-red-900/20 border border-red-800 rounded p-3 text-xs text-red-300 mono whitespace-pre-wrap"></div>
+      <div id="explainSummary"></div>
+      <div class="card">
+        <div class="card-header">📋 Original Command</div>
+        <pre id="explainCommand" class="text-xs mono text-gray-300 bg-panel-inner p-4 overflow-auto max-h-40 whitespace-pre-wrap"></pre>
+      </div>
+      <div class="card">
+        <div class="card-header">🌳 Explain Output</div>
+        <div class="p-4 max-h-[420px] overflow-y-auto mono text-xs leading-6" id="explainTree"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="fixed bottom-5 right-5 z-50 px-4 py-3 rounded-lg text-sm font-medium shadow-xl opacity-0 transition-all duration-300 pointer-events-none max-w-sm"></div>
 
 <script>
@@ -809,12 +841,14 @@ async function rsConfig(targetURI){
   const priBars = members.filter(m=>!m.arbiterOnly).sort((a,b)=>b.priority-a.priority).map(m=>{
     const pct = maxPri>0 ? Math.round((m.priority||0)/maxPri*100) : 0;
     const col = m.priority===maxPri?'#00ed64': m.priority>0?'#58a6ff':'#4b5563';
+    // Hostname takes the full available width with truncation (k8s pod names are long);
+    // the bar gets a fixed compact width since we only care about relative priority.
     return `<div class="flex items-center gap-2">
-      <span class="mono text-xs text-gray-400 w-32 truncate shrink-0">${esc(m.host.split(':')[0])}</span>
-      <div class="flex-1 bg-panel-inner rounded-full h-2">
+      <span class="mono text-xs text-gray-400 flex-1 min-w-0 truncate" title="${esc(m.host)}">${esc(m.host.split(':')[0])}</span>
+      <div class="w-24 bg-panel-inner rounded-full h-2 shrink-0">
         <div style="width:${pct}%;background:${col};height:8px;border-radius:4px"></div>
       </div>
-      <span class="mono text-xs w-6 text-right ${m.priority===maxPri?'text-mg':'text-gray-500'}">${m.priority}</span>
+      <span class="mono text-xs w-6 text-right shrink-0 ${m.priority===maxPri?'text-mg':'text-gray-500'}">${m.priority}</span>
     </div>`;
   }).join('');
 
@@ -1907,9 +1941,19 @@ function _matchesBatchFilter(op, p) {
 function rsSelect(currentURI, onchangeFn) {
   const rsList = rsNodesList();
   if (rsList.length === 0) return ''; // plain RS — no selector needed
+  // In sharded clusters expose mongos as the first ("cluster-wide") option so
+  // the user can switch back to it after selecting a specific shard. All
+  // shard-direct connections fail listDatabases / usersInfo with the
+  // "improperly connected to a sharded cluster" error, so mongos is the
+  // sensible default for users/roles management.
+  const isSharded = topology.type === 'sharded';
+  const mongosOpt = isSharded
+    ? `<option value="${esc(uri)}" ${uri===currentURI?'selected':''}>mongos (cluster-wide)</option>`
+    : '';
   return `<div class="flex items-center gap-2">
-    <span class="text-xs text-gray-500">Replica Set:</span>
+    <span class="text-xs text-gray-500">Target:</span>
     <select onchange="${onchangeFn}(this.value)" class="fi text-xs">
+      ${mongosOpt}
       ${rsList.map(n => {
         const base = injectCredsIntoUri(n.uri);
         const sep = base.includes('?') ? '&' : '?';
@@ -1923,14 +1967,13 @@ function rsSelect(currentURI, onchangeFn) {
 async function usersRoles(targetURI) {
   if (targetURI) usersRolesURI = targetURI;
   if (!usersRolesURI) {
-    // Default: first RS node with primaryPreferred, or connected URI
-    const first = rsNodesList()[0];
-    if (first) {
-      const sep = first.uri.includes('?') ? '&' : '?';
-      usersRolesURI = first.uri + sep + 'readPreference=primaryPreferred';
-    } else {
-      usersRolesURI = uri;
-    }
+    // Default to the connected URI — in a sharded cluster this is mongos, which
+    // is the correct entry point for cluster-wide users/roles (the data lives
+    // on the config servers and mongos federates the auth commands).
+    // Connecting directly to a shard fails with "(Unauthorized) … improperly
+    // connecting to a sharded cluster" for listDatabases / usersInfo.
+    // In a plain RS the connected URI is the RS itself, which is also correct.
+    usersRolesURI = uri;
   }
 
   // Persist DB selection from DOM before any re-render
@@ -1939,7 +1982,11 @@ async function usersRoles(targetURI) {
 
   const rsSel = rsSelect(usersRolesURI, 'setUsersRolesURI');
 
-  const dbsRes = await api('/api/db/stats', {uri: usersRolesURI});
+  // DB list always comes from mongos in a sharded cluster — shards refuse
+  // listDatabases when accessed directly. canonicalDataURI() returns mongos
+  // in sharded mode and the connected RS URI in plain RS mode.
+  const dbListURI = canonicalDataURI();
+  const dbsRes = await api('/api/db/stats', {uri: dbListURI});
   if (!Array.isArray(dbsRes))
     return setMain(errBox((dbsRes && dbsRes.error) || 'Failed to load databases'));
 
@@ -2759,6 +2806,8 @@ let sqSortCol='millis', sqSortDir='desc', sqCurrentList=[];
 async function slowQueries(targetURI){
   if(targetURI) sqTargetURI = targetURI;
   if(!sqTargetURI) {
+    // Profiler data (system.profile) is per-mongod, so default to the first
+    // shard primary in a sharded cluster (or the connected RS in plain RS).
     const first = rsNodesList()[0]||memberNodes.find(m=>m.role==='primary')||{uri};
     sqTargetURI = injectCredsIntoUri(first.uri||uri);
   }
@@ -2767,8 +2816,12 @@ async function slowQueries(targetURI){
 
   const instanceSel = instanceSelect(sqTargetURI,'setSqURI');
   const minHeaderActions = `<div class="flex gap-2 flex-wrap items-center">${instanceSel}<button onclick="slowQueries()" class="btn-sm">↻</button></div>`;
-  const dbsRes = await api('/api/db/stats',{uri:sqTargetURI});
-  if(!Array.isArray(dbsRes)) return setMainWithError('🐢','Slow Queries',minHeaderActions,(dbsRes&&dbsRes.error)||'Failed to load databases',sqTargetURI);
+  // DB list always comes from mongos in a sharded cluster — shards refuse
+  // listDatabases when accessed directly. The selected instance (sqTargetURI)
+  // is still used below for profiler-level / profiler-entries calls.
+  const dbListURI = canonicalDataURI();
+  const dbsRes = await api('/api/db/stats',{uri:dbListURI});
+  if(!Array.isArray(dbsRes)) return setMainWithError('🐢','Slow Queries',minHeaderActions,(dbsRes&&dbsRes.error)||'Failed to load databases',dbListURI);
   const dbOpts = dbsRes.map(d=>`<option value="${esc(d.name)}" ${d.name===sqSelectedDb?'selected':''}>${esc(d.name)}</option>`).join('');
 
   // Fetch profiling level for selected db
@@ -2889,6 +2942,19 @@ function buildSqTable(){
     const docsExam = e.docsExamined??'--';
     const docsRet  = e.nreturned??'--';
     const cmd = JSON.stringify(e.command||e.query||{},null,2);
+    // Decide whether this entry is meaningfully explainable. MongoDB's explain
+    // accepts find / aggregate / count / distinct / findAndModify / update /
+    // delete / mapReduce. We also accept the legacy op="query" form which the
+    // backend will reconstruct into a find command.
+    const cmdObj = e.command||e.query||{};
+    const cmdKeysLower = Object.keys(cmdObj).map(k=>k.toLowerCase());
+    const explainableCmds = ['find','aggregate','count','distinct','findandmodify','delete','update','mapreduce'];
+    const opLower = (op||'').toLowerCase();
+    const isExpl = opLower==='query' || opLower==='update' || opLower==='remove' ||
+                   cmdKeysLower.some(k=>explainableCmds.includes(k));
+    const explainBtn = isExpl
+      ? `<button onclick="event.stopPropagation();runExplain(${i})" class="btn-xs" title="Run explain on this command">🔬 Explain</button>`
+      : '';
     return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="toggleDetail('${id}')">
       <td class="mono text-xs text-gray-500">${esc(ts.slice(0,19).replace('T',' '))}</td>
       <td><span class="mb b-SECONDARY text-xs">${esc(op)}</span></td>
@@ -2898,7 +2964,7 @@ function buildSqTable(){
       <td class="mono text-xs">${keysExam}</td>
       <td class="mono text-xs">${docsExam}</td>
       <td class="mono text-xs">${docsRet}</td>
-      <td class="text-gray-600 text-xs">▼</td>
+      <td class="text-gray-600 text-xs whitespace-nowrap">${explainBtn}<span class="ml-2">▼</span></td>
     </tr>
     <tr id="${id}" class="op-detail"><td colspan="9" class="p-0 bg-panel-inner">
       <div class="p-4"><div class="text-xs font-bold text-gray-500 uppercase mb-2">Command</div>
@@ -2926,6 +2992,170 @@ async function applyProfiler(){
   if(r&&r.error) return toast(r.error,'error');
   toast(`Profiler set to level ${level}, slowMs=${slowMs}`,'success');
   setTimeout(()=>slowQueries(),600);
+}
+
+// ─── Explain: run MongoDB explain on a profile entry's command ───
+let _explainCurrentEntry = null;
+
+async function runExplain(rowIdx) {
+  const entry = sqCurrentList[rowIdx];
+  if (!entry) return;
+  _explainCurrentEntry = entry;
+
+  const modal = document.getElementById('explainModal');
+  modal.classList.add('open');
+
+  document.getElementById('explainNs').textContent = entry.ns || '';
+  document.getElementById('explainOp').textContent = entry.op || '';
+  document.getElementById('explainCommand').textContent =
+    JSON.stringify(entry.command || entry.query || {}, null, 2);
+  document.getElementById('explainSummary').innerHTML = '';
+  document.getElementById('explainTree').innerHTML = '';
+  document.getElementById('explainError').classList.add('hidden');
+
+  await executeExplain();
+}
+
+async function executeExplain() {
+  if (!_explainCurrentEntry) return;
+  const entry = _explainCurrentEntry;
+  const verbosity = document.getElementById('explainVerbosity').value;
+  const ns = entry.ns || '';
+  const dotIdx = ns.indexOf('.');
+  const db = dotIdx >= 0 ? ns.substring(0, dotIdx) : sqSelectedDb;
+  const cmd = entry.command || entry.query || {};
+
+  const treeEl = document.getElementById('explainTree');
+  const summaryEl = document.getElementById('explainSummary');
+  const errEl = document.getElementById('explainError');
+  errEl.classList.add('hidden');
+  summaryEl.innerHTML = '';
+  treeEl.innerHTML = '<div class="text-gray-500 text-xs flex items-center gap-2 p-3"><span class="spinner"></span>Running explain…</div>';
+
+  const r = await api('/api/db/explain', {
+    uri: sqTargetURI,
+    db: db,
+    ns: ns,
+    op: entry.op || '',
+    command: JSON.stringify(cmd),
+    verbosity: verbosity,
+  });
+
+  if (!r || r.error) {
+    treeEl.innerHTML = '';
+    errEl.textContent = (r && r.error) ? r.error : 'No response';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  summaryEl.innerHTML = buildExplainSummary(r);
+  treeEl.innerHTML = '';
+  buildJT('explainTree', r, 3);
+}
+
+// Extract a flat list of stages from the winning plan tree.
+function _explainStageChain(plan) {
+  const out = [];
+  let s = plan;
+  let guard = 0;
+  while (s && guard++ < 64) {
+    if (s.stage) out.push(s.stage);
+    if (s.inputStage) { s = s.inputStage; continue; }
+    if (Array.isArray(s.inputStages) && s.inputStages.length) { s = s.inputStages[0]; continue; }
+    break;
+  }
+  return out;
+}
+
+function buildExplainSummary(res) {
+  if (!res || typeof res !== 'object') return '';
+
+  // In a sharded explain the top level contains "shards":{...}; the inner objects
+  // carry queryPlanner / executionStats. We pick the first shard for the summary
+  // and note multi-shard execution.
+  let qp = res.queryPlanner;
+  let es = res.executionStats;
+  let shardCount = 0;
+  let shardName = '';
+  if (!qp && res.shards && typeof res.shards === 'object') {
+    const names = Object.keys(res.shards);
+    shardCount = names.length;
+    if (shardCount > 0) {
+      shardName = names[0];
+      const first = res.shards[shardName];
+      if (Array.isArray(first) && first.length) {
+        qp = first[0].queryPlanner;
+        es = first[0].executionStats;
+      } else if (first && typeof first === 'object') {
+        qp = first.queryPlanner;
+        es = first.executionStats;
+      }
+    }
+  }
+  qp = qp || {};
+  es = es || {};
+
+  const winningPlan = qp.winningPlan || {};
+  const stages = _explainStageChain(winningPlan);
+  const hasIxScan  = stages.includes('IXSCAN') || stages.includes('IDHACK') || stages.includes('DISTINCT_SCAN');
+  const hasCollScan= stages.includes('COLLSCAN');
+  const hasSortKey = stages.includes('SORT');
+
+  const totalDocs = es.totalDocsExamined;
+  const totalKeys = es.totalKeysExamined;
+  const nReturned = es.nReturned;
+  const execMs    = es.executionTimeMillis;
+
+  let badge = '<span class="mb b-PRIMARY">✓ Looks fine</span>';
+  if (hasCollScan) badge = '<span class="mb b-DOWN">⚠ COLLSCAN — no index used</span>';
+  else if (hasIxScan) badge = '<span class="mb b-PRIMARY">✓ Index used</span>';
+  if (hasSortKey && stages[0] === 'SORT') {
+    badge += ' <span class="mb b-ARBITER">SORT in memory</span>';
+  }
+
+  const ratio = (nReturned && nReturned > 0 && totalDocs !== undefined)
+    ? (totalDocs / nReturned) : null;
+  const ratioCls = ratio === null ? 'text-gray-200'
+    : ratio > 100 ? 'text-red-400'
+    : ratio > 10  ? 'text-yellow-400'
+    : 'text-mg';
+  const execCls = execMs === undefined ? 'text-gray-200'
+    : execMs >= 1000 ? 'text-red-400'
+    : execMs >= 100  ? 'text-yellow-400'
+    : 'text-mg';
+
+  const shardNote = shardCount > 0
+    ? `<div class="text-xs text-gray-500 mt-2">Sharded explain — summary from shard <span class="mono text-gray-300">${esc(shardName)}</span> of ${shardCount}; full per-shard breakdown below.</div>`
+    : '';
+
+  return `<div class="card">
+    <div class="card-header">📊 Summary ${badge}</div>
+    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+      <div><div class="text-gray-500 mb-1">Winning Plan Stages</div>
+        <div class="mono text-gray-200 font-bold break-words">${stages.length?esc(stages.join(' → ')):'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Exec Time</div>
+        <div class="mono font-bold ${execCls}">${execMs!==undefined?execMs+'ms':'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Returned</div>
+        <div class="mono text-gray-200 font-bold">${nReturned??'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Docs / Returned</div>
+        <div class="mono font-bold ${ratioCls}">${ratio===null?'—':ratio.toFixed(1)+'×'}</div></div>
+      <div><div class="text-gray-500 mb-1">Docs Examined</div>
+        <div class="mono text-gray-200 font-bold">${totalDocs??'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Keys Examined</div>
+        <div class="mono text-gray-200 font-bold">${totalKeys??'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Namespace</div>
+        <div class="mono text-gray-300 break-words">${esc(qp.namespace||_explainCurrentEntry?.ns||'')}</div></div>
+      <div><div class="text-gray-500 mb-1">Index Filter Set</div>
+        <div class="mono ${qp.indexFilterSet?'text-yellow-400':'text-gray-500'}">${qp.indexFilterSet?'yes':'no'}</div></div>
+    </div>
+    ${shardNote}
+  </div>`;
+}
+
+function reRunExplain() { executeExplain(); }
+function closeExplainModal() {
+  document.getElementById('explainModal').classList.remove('open');
+  _explainCurrentEntry = null;
 }
 
 // ═══════════════════════════════════════════════════════════ LOG VIEWER

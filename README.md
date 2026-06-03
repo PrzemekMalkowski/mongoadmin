@@ -90,7 +90,7 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
 | **Live Traffic Monitor** | Real-time, multi-host charts for op counters (inserts/queries/updates/deletes/commands/getmores), connections, network throughput, resident memory, and lock queue depth — configurable polling interval (1–30 s) and rolling time window (5 min – 4 h); uses the lightweight `/api/server/metrics` endpoint so each poll fetches only the requested `serverStatus` sections (~2–4 KB instead of ~300–500 KB); data stays in browser memory only |
 | **Current Ops** | Live operation list with runtime, plan summary, lock wait, app name — expand any row for full command and metadata |
 | **Kill Operations** | Single-op kill or batch kill with filters (op type, namespace, app name, minimum runtime) |
-| **Slow Query Profiler** | Get/set profiling level per database, browse `system.profile` with filters |
+| **Slow Query Profiler** | Get/set profiling level per database, browse `system.profile` with filters, and run **EXPLAIN** on any captured query in a pop-up — strips session/routing metadata automatically, supports `queryPlanner`, `executionStats`, and `allPlansExecution` verbosity, with a summary card flagging COLLSCAN, IXSCAN, and in-memory sorts |
 | **Log Viewer** | View `global`, `rs`, or `startupWarnings` log lines |
 
 ### Data & Indexes
@@ -180,6 +180,98 @@ mongodb+srv://username:password@cluster.example.mongodb.net/
 
 ---
 
+## 🔑 Required MongoDB Privileges
+
+MongoAdmin authenticates as a regular MongoDB user — there is no separate user database inside the tool. Every dashboard runs admin commands on your behalf, so the connected user must hold the privileges those commands require. The tables below break the privilege requirements down per dashboard so you can grant the minimum set that fits your use case.
+
+> [!NOTE]
+> In a **sharded cluster**, create the user on a `mongos` against the `admin` database — MongoDB writes it to the config servers and it is then valid cluster-wide. Create users only on each shard's primary when you need shard-local accounts (the per-shard authentication prompt in MongoAdmin uses these).
+
+### Per-dashboard privilege map
+
+| Dashboard / Feature | Built-in role(s) needed | Underlying commands / actions |
+|---------------------|-------------------------|------------------------------|
+| Topology Discovery, RS Status, Cluster Diagram | `clusterMonitor` | `listShards`, `getCmdLineOpts`, `replSetGetStatus`, `replSetGetConfig`, find on `config.mongos`, `$currentOp` |
+| RS Configuration — **view** | `clusterMonitor` | `replSetGetConfig`, `getDefaultRWConcern` |
+| RS Configuration — **apply changes** | `clusterManager` | `replSetReconfig`, `setDefaultRWConcern` |
+| Sharding Status, Chunk Distribution, Database Stats | `clusterMonitor` | `balancerStatus`, `listDatabases`, find / aggregate on `config.collections`, `config.chunks`, `config.databases`, `config.changelog` |
+| Balancer Control | `clusterManager` | `balancerStart`, `balancerStop` |
+| Collection Stats, Index Management — **list** | `readAnyDatabase` *(or `dbAdminAnyDatabase`)* | `dbStats`, `collStats`, `listCollections`, `listIndexes`, `$indexStats` |
+| Index Management — **drop index** | `dbAdminAnyDatabase` | `dropIndex` |
+| Server Status, Host Info, Network Compression, WiredTiger, Top Commands, Live Traffic Monitor | `clusterMonitor` | `serverStatus`, `hostInfo`, `top`, `getParameter` |
+| Flow Control — **set** | `hostManager` | `setParameter` (`enableFlowControl`, `flowControlTargetLagSeconds`) |
+| Current Ops | `clusterMonitor` | `$currentOp` with `inprog` action |
+| Kill Operations | `hostManager` | `killop` |
+| Slow Queries — **browse `system.profile`** | `clusterMonitor` | find on `<db>.system.profile` |
+| Slow Queries — **change profiling level** | `dbAdminAnyDatabase` | `profile` command (`enableProfiler`) |
+| Slow Queries — **EXPLAIN on user collection** | `readAnyDatabase` | privileges of the underlying op (`find`, `aggregate`, `count`, …); explaining `update` / `delete` additionally requires write privileges on the target collection |
+| Log Viewer | `clusterMonitor` | `getLog` |
+| Oplog Stats | `clusterMonitor` + `read` on `local` | `replSetGetStatus`, `serverStatus`, `collStats` and find on `local.oplog.rs` |
+| Users & Roles | `userAdminAnyDatabase` | `usersInfo`, `rolesInfo`, `createUser`, `dropUser`, `updateUser`, `createRole`, `updateRole`, `dropRole` |
+
+### Recommended `madmin` user — full functionality
+
+The set below covers **every** MongoAdmin dashboard except explain of `update` / `delete` ops on user collections (which would also require write privileges — see the note below). It deliberately avoids `root` and `clusterAdmin` so the user cannot drop databases.
+
+Run this on a `mongos` (for sharded) or any RS member's primary (for replica sets):
+
+```js
+use admin
+db.createUser({
+  user: "madmin",
+  pwd:  passwordPrompt(),   // or a literal string
+  roles: [
+    { role: "clusterMonitor",       db: "admin" },  // monitoring, RS / sharding status, getLog, find on system.profile and config.*
+    { role: "clusterManager",       db: "admin" },  // balancer, default RWC, replSetReconfig
+    { role: "hostManager",          db: "admin" },  // killOp, setParameter (flow control)
+    { role: "dbAdminAnyDatabase",   db: "admin" },  // drop index, profile command, dbStats / collStats on any DB
+    { role: "readAnyDatabase",      db: "admin" },  // explain on user collections, find on any DB
+    { role: "userAdminAnyDatabase", db: "admin" },  // user / role management
+    { role: "read",                 db: "local" }   // oplog.rs (Oplog Stats dashboard)
+  ]
+})
+```
+
+Then connect with:
+
+```
+mongodb://madmin:<password>@<host>:27017/?authSource=admin
+```
+
+> [!TIP]
+> If you also want to **EXPLAIN** `update` and `delete` operations from the profiler (a niche case — explain on writes still requires the underlying write privileges even though no rows are touched), add `{ role: "readWriteAnyDatabase", db: "admin" }` to the role list. Otherwise the Explain button on `update` / `remove` profile rows will return an authorization error, while everything else keeps working.
+
+### Recommended `madmin-ro` user — read-only / monitoring only
+
+For operators who should only **view** the cluster, pair this user with the `--view-only` flag so destructive UI controls are also hidden:
+
+```js
+use admin
+db.createUser({
+  user: "madmin-ro",
+  pwd:  passwordPrompt(),
+  roles: [
+    { role: "clusterMonitor",  db: "admin" },
+    { role: "readAnyDatabase", db: "admin" },
+    { role: "read",            db: "local" }
+  ]
+})
+```
+
+This account can use every monitoring-only dashboard (RS Status, Cluster Diagram, Sharding Status, Server Status, Host Info, Live Traffic, Current Ops, Slow Queries with EXPLAIN, Log Viewer, Oplog Stats, Database / Collection Stats, Index list). All write-back features (balancer toggle, RS reconfig, flow control, kill op, drop index, set profile level, user / role management) will be refused both by MongoAdmin (when launched with `--view-only`) and by MongoDB itself (insufficient privileges).
+
+### Quick alternative — `root`
+
+If you don't mind giving the tool full superuser rights (typical for a DBA's own session), `root` covers everything in one role:
+
+```js
+db.createUser({ user: "madmin", pwd: passwordPrompt(), roles: [ { role: "root", db: "admin" } ] })
+```
+
+This is the simplest option but the least defensible from a least-privilege standpoint.
+
+---
+
 ## 🗂 Project Structure
 
 ```
@@ -260,6 +352,7 @@ All endpoints accept `POST` requests with `application/x-www-form-urlencoded` bo
 | `POST /api/db/profiler-level` | `uri`, `db` | Get current profiling level |
 | `POST /api/db/profiler-level-set` | `uri`, `db`, `level`, `slowMs` | Set profiling level and threshold |
 | `POST /api/db/profiler-entries` | `uri`, `db`, `ns`, `op`, `minMs`, `limit` | Query `system.profile` |
+| `POST /api/db/explain` | `uri`, `db`, `command` (JSON), `op`, `ns`, `verbosity` | Run `explain` on a profiled command — strips driver metadata (`lsid`, `$clusterTime`, `$db`, etc.), reorders the inner command so the explainable op (`find` / `aggregate` / `count` / `distinct` / `findAndModify` / `update` / `delete` / `mapReduce`) is the first key, and returns the raw `explain` output. `verbosity` accepts `queryPlanner`, `executionStats` (default), or `allPlansExecution` |
 | `POST /api/db/log` | `uri`, `kind` | `getLog` (global / rs / startupWarnings) |
 | `POST /api/db/wiredtiger` | `uri` | WiredTiger, tcmalloc, and memory sections |
 

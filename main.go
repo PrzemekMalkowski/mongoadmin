@@ -43,7 +43,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const version = "0.3.3"
+const version = "0.3.4"
 
 var debugMode bool
 var viewOnly  bool
@@ -3064,6 +3064,155 @@ func handleProfilerEntries(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, entries)
 }
 
+// handleExplain runs db.runCommand({explain: <cmd>, verbosity: ...}) for a
+// command captured by the profiler. Profile entries contain session and
+// routing metadata (lsid, $clusterTime, $db, …) that MongoDB rejects when
+// nested under explain, so those fields are stripped first. The explainable
+// operation (find / aggregate / count / distinct / findAndModify / update /
+// delete / mapReduce) must be the first key of the inner command — we
+// reorder accordingly. Legacy op="query" profile entries with only a raw
+// filter document are reconstructed into a find command from the namespace.
+func handleExplain(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	uri       := formURI(r)
+	dbName    := strings.TrimSpace(r.FormValue("db"))
+	cmdJSON   := r.FormValue("command")
+	opType    := strings.ToLower(strings.TrimSpace(r.FormValue("op")))
+	ns        := strings.TrimSpace(r.FormValue("ns"))
+	verbosity := strings.TrimSpace(r.FormValue("verbosity"))
+
+	if dbName == "" {
+		jsonErr(w, "db required", 400)
+		return
+	}
+	if strings.TrimSpace(cmdJSON) == "" || cmdJSON == "{}" {
+		jsonErr(w, "command is empty — nothing to explain", 400)
+		return
+	}
+	if verbosity == "" {
+		verbosity = "executionStats"
+	}
+	switch verbosity {
+	case "queryPlanner", "executionStats", "allPlansExecution":
+	default:
+		jsonErr(w, "verbosity must be queryPlanner, executionStats, or allPlansExecution", 400)
+		return
+	}
+
+	shardCreds := parseShardCredentials(r)
+	uri = applyShardCredentials(uri, shardCreds)
+
+	// Parse the original command as a map.
+	var cmdMap map[string]interface{}
+	if err := json.Unmarshal([]byte(cmdJSON), &cmdMap); err != nil {
+		jsonErr(w, "invalid command JSON: "+err.Error(), 400)
+		return
+	}
+
+	// Drop session / cluster / routing / API metadata. These are added by the
+	// driver and the server rejects them when wrapped in explain.
+	for _, k := range []string{
+		"lsid", "$clusterTime", "$db", "$audit", "$readPreference", "$client",
+		"$configServerState", "$queryOptions",
+		"txnNumber", "autocommit", "startTransaction", "signature",
+		"apiVersion", "apiStrict", "apiDeprecationErrors",
+		"needsMerge", "fromMongos", "mayBypassWriteBlocking", "useBypassDocumentValidation",
+		"$readOnce", "readOnce",
+	} {
+		delete(cmdMap, k)
+	}
+
+	// Locate the explainable op (case-insensitive). Order of preference is
+	// fixed so a profile entry containing both "find" and (say) "count" still
+	// resolves deterministically.
+	explainableOps := []string{
+		"find", "aggregate", "count", "distinct",
+		"findAndModify", "delete", "update", "mapReduce",
+	}
+	var primaryKey string
+	var primaryVal interface{}
+	for _, op := range explainableOps {
+		for k, v := range cmdMap {
+			if strings.EqualFold(k, op) {
+				primaryKey = k
+				primaryVal = v
+				break
+			}
+		}
+		if primaryKey != "" {
+			break
+		}
+	}
+
+	// Fallback: legacy op="query" entries have just a filter document.
+	// Reconstruct a find command from the namespace.
+	if primaryKey == "" && opType == "query" {
+		collName := ns
+		if dotIdx := strings.Index(ns, "."); dotIdx >= 0 {
+			collName = ns[dotIdx+1:]
+		}
+		if collName == "" {
+			jsonErr(w, "cannot reconstruct find command: missing collection name in ns", 400)
+			return
+		}
+		// In the legacy profile shape the entry's stored object may be the
+		// filter directly, or may be wrapped under $query / filter / $orderby.
+		filter := map[string]interface{}{}
+		sort   := map[string]interface{}{}
+		for k, v := range cmdMap {
+			switch {
+			case strings.EqualFold(k, "$query"), strings.EqualFold(k, "filter"):
+				if m, ok := v.(map[string]interface{}); ok {
+					for fk, fv := range m { filter[fk] = fv }
+				}
+			case strings.EqualFold(k, "$orderby"), strings.EqualFold(k, "sort"):
+				if m, ok := v.(map[string]interface{}); ok {
+					for sk, sv := range m { sort[sk] = sv }
+				}
+			default:
+				filter[k] = v
+			}
+		}
+		cmdMap = map[string]interface{}{"find": collName}
+		if len(filter) > 0 { cmdMap["filter"] = filter }
+		if len(sort) > 0   { cmdMap["sort"]   = sort   }
+		primaryKey = "find"
+		primaryVal = collName
+	}
+
+	if primaryKey == "" {
+		jsonErr(w, "command is not directly explainable (no find / aggregate / count / distinct / findAndModify / update / delete / mapReduce key found after stripping metadata)", 400)
+		return
+	}
+
+	// Aggregate explain refuses to run when a cursor field is present in the
+	// inner command — strip it for safety.
+	if strings.EqualFold(primaryKey, "aggregate") {
+		delete(cmdMap, "cursor")
+	}
+
+	// Build the inner command with the primary op first (required), then the
+	// rest of the keys.
+	innerCmd := bson.D{{Key: primaryKey, Value: primaryVal}}
+	for k, v := range cmdMap {
+		if k != primaryKey {
+			innerCmd = append(innerCmd, bson.E{Key: k, Value: v})
+		}
+	}
+
+	explainCmd := bson.D{
+		{Key: "explain",   Value: innerCmd},
+		{Key: "verbosity", Value: verbosity},
+	}
+
+	res, err := runCmd(uri, dbName, explainCmd)
+	if err != nil {
+		jsonErr(w, err.Error(), 500)
+		return
+	}
+	jsonOK(w, res)
+}
+
 // ── Log Viewer ────────────────────────────────────────────────────────────────
 
 func handleGetLog(w http.ResponseWriter, r *http.Request) {
@@ -3364,6 +3513,7 @@ func main() {
 	mux.HandleFunc("/api/db/profiler-level",       handleGetProfilingLevel)
 	mux.HandleFunc("/api/db/profiler-level-set",   readOnlyGuard(handleSetProfilingLevel))
 	mux.HandleFunc("/api/db/profiler-entries",     handleProfilerEntries)
+	mux.HandleFunc("/api/db/explain",              handleExplain)
 	mux.HandleFunc("/api/db/log",                  handleGetLog)
 	mux.HandleFunc("/api/db/wiredtiger",           handleWiredTiger)
 	mux.HandleFunc("/api/user/roles",              handleGetRoles)
