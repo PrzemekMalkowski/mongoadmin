@@ -53,9 +53,11 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
   </tr>
   <tr>
     <td><a href="docs/screenshots/users_roles.png"><img src="docs/screenshots/users_roles.png" alt="Users & Roles" width="280"/></a></td>
+    <td><a href="docs/screenshots/query_explain.png"><img src="docs/screenshots/query_explain.png" alt="Query Explain" width="280"/></a></td>
   </tr>
   <tr>
     <td align="center"><em>Users &amp; Roles</em></td>
+    <td align="center"><em>Query Explain</em></td>
   </tr>
 </table>
 
@@ -90,20 +92,21 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
 | **Live Traffic Monitor** | Real-time, multi-host charts for op counters (inserts/queries/updates/deletes/commands/getmores), connections, network throughput, resident memory, and lock queue depth — configurable polling interval (1–30 s) and rolling time window (5 min – 4 h); uses the lightweight `/api/server/metrics` endpoint so each poll fetches only the requested `serverStatus` sections (~2–4 KB instead of ~300–500 KB); data stays in browser memory only |
 | **Current Ops** | Live operation list with runtime, plan summary, lock wait, app name — expand any row for full command and metadata |
 | **Kill Operations** | Single-op kill or batch kill with filters (op type, namespace, app name, minimum runtime) |
-| **Slow Query Profiler** | Get/set profiling level per database, browse `system.profile` with filters, and run **EXPLAIN** on any captured query in a pop-up — strips session/routing metadata automatically, supports `queryPlanner`, `executionStats`, and `allPlansExecution` verbosity, with a summary card flagging COLLSCAN, IXSCAN, and in-memory sorts |
-| **Log Viewer** | View `global`, `rs`, or `startupWarnings` log lines |
+| **Slow Query Profiler** | Per-mongod profiler control with the full v7 surface — level (0/1/2), `slowMs`, `sampleRate`, and a **server-side capture filter** built from structured inputs (namespace, command type, min docsExamined, planSummary, client IP, user name) so only matching ops are written to `system.profile`. Mongos is intentionally excluded from the instance selector since the profiler is per-mongod. Browse captured entries with a separate client-side filter, sortable columns, full raw profile entry expansion, and a **🔬 Explain** button per row that runs `explain` via mongos (avoiding the "improperly connected to a sharded cluster" auth error) and shows a **per-shard execution visualization** — stage chain, indexes used with their keyPattern, and the merger pipeline — alongside the raw JSON tree. Level 2 surfaces an explicit production warning since it captures every operation. Filter can be removed via a dedicated **Unset Filter** button (`db.setProfilingLevel(level, {filter: "unset"})`). |
+| **Log Viewer** | View `global`, `rs`, or `startupWarnings` lines from the in-memory `getLog` cache (the most recent ≤1024 events — not the on-disk file), with severity/text filters, a "show last N" range selector, warning/error counts, and a click-to-expand interactive JSON tree (with Expand All / Collapse All) for structured (4.4+) log entries |
 
 ### Data & Indexes
 | Feature | Description |
 |---------|-------------|
 | **Collection Stats** | Count, data size, storage size, index size, shard key — across all collections in a DB |
 | **Index Management** | List indexes with usage counters, sizes, TTL, hidden/partial/sparse flags; drop indexes (shard-key index protection) |
-| **Oplog Stats** | Oplog size, usage %, retention window (hours), and per-member replication lag |
+| **Oplog Stats** | Oplog size, usage %, document count, average entry size, retention window with a `tFirst → tLast` coverage timeline, average write rate (MB/h) and projected retention at capacity, per-member applied optime and replication lag, plus an on-demand per-collection write-volume breakdown of the recent oplog |
 
 ### Security
 | Feature | Description |
 |---------|-------------|
-| **Users & Roles** | View, create, and delete users; assign/revoke roles; create and update custom roles with privilege builder |
+| **Users & Roles** | View, create, and delete users; assign/revoke roles; create and update custom roles with a privilege builder. In sharded clusters, **🔄 sync** any user or role to other shards — the modal queries each shard's presence first and pre-selects only the missing targets; for user sync you supply a password (MongoDB never returns the source SCRAM hash), for role sync only `privileges` and `inheritedRoles` are copied |
+| **Security Status** | Per-member authentication posture (whether access control is required) from `getCmdLineOpts` `security.authorization` — with keyFile / `clusterAuthMode` / TLS context — a prominent warning when any reachable node has no access control, plus authentication-mechanism usage counters (SCRAM-SHA-1/256, MONGODB-X509, etc.) from `serverStatus`. Works for standalone, replica set, and sharded clusters |
 | **Per-Shard Auth** | Prompt for shard-specific credentials when a shard has different auth from the mongos |
 | **Password Masking** | Connection URIs are masked in the browser UI — passwords are never displayed |
 
@@ -203,11 +206,12 @@ MongoAdmin authenticates as a regular MongoDB user — there is no separate user
 | Current Ops | `clusterMonitor` | `$currentOp` with `inprog` action |
 | Kill Operations | `hostManager` | `killop` |
 | Slow Queries — **browse `system.profile`** | `clusterMonitor` | find on `<db>.system.profile` |
-| Slow Queries — **change profiling level** | `dbAdminAnyDatabase` | `profile` command (`enableProfiler`) |
-| Slow Queries — **EXPLAIN on user collection** | `readAnyDatabase` | privileges of the underlying op (`find`, `aggregate`, `count`, …); explaining `update` / `delete` additionally requires write privileges on the target collection |
+| Slow Queries — **change profiling level / sampleRate / capture filter** | `dbAdminAnyDatabase` | `profile` command (`enableProfiler`) with `slowms`, `sampleRate`, and `filter` options |
+| Slow Queries — **EXPLAIN on user collection** | `readAnyDatabase` | privileges of the underlying op (`find`, `aggregate`, `count`, …); explain is routed through mongos so cluster-wide reads work; explaining `update` / `delete` additionally requires write privileges on the target collection |
 | Log Viewer | `clusterMonitor` | `getLog` |
 | Oplog Stats | `clusterMonitor` + `read` on `local` | `replSetGetStatus`, `serverStatus`, `collStats` and find on `local.oplog.rs` |
-| Users & Roles | `userAdminAnyDatabase` | `usersInfo`, `rolesInfo`, `createUser`, `dropUser`, `updateUser`, `createRole`, `updateRole`, `dropRole` |
+| Users & Roles — **view / manage** | `userAdminAnyDatabase` | `usersInfo`, `rolesInfo`, `createUser`, `dropUser`, `updateUser`, `createRole`, `updateRole`, `dropRole` |
+| Users & Roles — **cross-shard sync** | `userAdminAnyDatabase` on each target shard | `usersInfo` / `rolesInfo` (read source), `createUser` / `createRole` (write target). Per-shard credentials apply: when individual shards use different credentials from mongos, MongoAdmin's per-shard auth prompt collects them |
 
 ### Recommended `madmin` user — full functionality
 
@@ -335,7 +339,8 @@ All endpoints accept `POST` requests with `application/x-www-form-urlencoded` bo
 | `POST /api/db/chunk-distribution` | `uri`, `ns` | Chunk and data distribution for a sharded namespace |
 | `POST /api/db/indexes` | `uri`, `db`, `collection` | List indexes with usage stats and sizes |
 | `POST /api/db/drop-index` | `uri`, `db`, `collection`, `name` | Drop a named index |
-| `POST /api/db/oplog-stats` | `uri`, `rs_uri[]` | Oplog size, usage, retention window, and member lag |
+| `POST /api/db/oplog-stats` | `uri`, `rs_uri[]` | Oplog size, usage, document count, average entry size, retention window with first/last timestamps, average write rate, projected retention at capacity, and per-member applied optime + lag |
+| `POST /api/db/oplog-analyze` | `uri`, `minutes`, `limit` | Per-collection write-volume breakdown of the recent oplog (last `minutes`, default 10) — total MB, operation count, and average op size, sorted by volume; requires `$bsonSize` (MongoDB 4.4+) |
 
 ### Operations
 
@@ -349,11 +354,12 @@ All endpoints accept `POST` requests with `application/x-www-form-urlencoded` bo
 
 | Endpoint | Key Parameters | Description |
 |----------|---------------|-------------|
-| `POST /api/db/profiler-level` | `uri`, `db` | Get current profiling level |
-| `POST /api/db/profiler-level-set` | `uri`, `db`, `level`, `slowMs` | Set profiling level and threshold |
-| `POST /api/db/profiler-entries` | `uri`, `db`, `ns`, `op`, `minMs`, `limit` | Query `system.profile` |
+| `POST /api/db/profiler-level` | `uri`, `db` | Get current profiling level — returns `was`, `slowms`, `sampleRate`, and any server-side `filter` document |
+| `POST /api/db/profiler-level-set` | `uri`, `db`, `level`, `slowMs`, `sampleRate`, `filter` | Set profiling level and threshold. `sampleRate` is a float in `[0.0, 1.0]` and is sent only when supplied. `filter` is either a JSON match document (applied at capture time, level 1 only) or the literal string `"unset"` to remove an existing filter — matches `db.setProfilingLevel(level, {filter: "unset"})` in the v7 docs |
+| `POST /api/db/profiler-entries` | `uri`, `db`, `ns`, `cmdType`, `planSummary`, `user`, `minMs`, `minDocsExamined`, `minCpuMs`, `limit` | Browse `system.profile`. `cmdType` (`find` / `aggregate` / `count` / `distinct` / `findAndModify` / `update` / `delete` / `insert` / `getMore`) matches both legacy `op` values and modern `command.<name>` shapes |
 | `POST /api/db/explain` | `uri`, `db`, `command` (JSON), `op`, `ns`, `verbosity` | Run `explain` on a profiled command — strips driver metadata (`lsid`, `$clusterTime`, `$db`, etc.), reorders the inner command so the explainable op (`find` / `aggregate` / `count` / `distinct` / `findAndModify` / `update` / `delete` / `mapReduce`) is the first key, and returns the raw `explain` output. `verbosity` accepts `queryPlanner`, `executionStats` (default), or `allPlansExecution` |
 | `POST /api/db/log` | `uri`, `kind` | `getLog` (global / rs / startupWarnings) |
+| `POST /api/db/security-status` | `uri`, `node_id[]`, `node_role[]`, `node_uri[]` | Per-member authentication posture from `getCmdLineOpts` + authentication-mechanism usage counters from `serverStatus`; falls back to inspecting `uri` for standalone  |
 | `POST /api/db/wiredtiger` | `uri` | WiredTiger, tcmalloc, and memory sections |
 
 ### Users & Roles
@@ -370,6 +376,9 @@ All endpoints accept `POST` requests with `application/x-www-form-urlencoded` bo
 | `POST /api/user/create-role` | `uri`, `db`, `roleName`, `privileges`, `inheritedRoles` | Create a custom role |
 | `POST /api/user/update-role` | `uri`, `db`, `roleName`, `privileges`, `inheritedRoles` | Update a custom role |
 | `POST /api/user/delete-role` | `uri`, `db`, `roleName` | Drop a custom role |
+| `POST /api/user/check-presence` | `uri`, `kind` (`user`\|`role`), `name`, `db`, `targetUri[]` | Check whether a user or role exists on each of the given target shard URIs. Returns one entry per target with `{shardId, uri, exists, error}` — tolerant of per-target failures so unreachable shards report their error rather than failing the whole call |
+| `POST /api/user/sync-user` | `uri`, `db`, `username`, `password`, `targetUri[]` | Copy a user from the source URI to each target shard. The handler reads the role list from the source via `usersInfo` and creates the user on every target with the supplied plaintext password (MongoDB never exposes SCRAM hashes). Per-target `{ok, skipped, error}` — `skipped` indicates "user already exists, left alone" |
+| `POST /api/user/sync-role` | `uri`, `db`, `roleName`, `targetUri[]` | Copy a custom role to each target shard. Fetches `privileges` and `inheritedRoles` from the source via `rolesInfo` with `showPrivileges:true` and creates the role on every target. Built-in roles cannot be synced. Per-target `{ok, skipped, error}` |
 
 ---
 

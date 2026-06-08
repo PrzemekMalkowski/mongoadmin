@@ -43,7 +43,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const version = "0.3.4"
+const version = "0.3.5"
 
 var debugMode bool
 var viewOnly  bool
@@ -326,7 +326,23 @@ func extractShardID(uri string) string {
 	return uri
 }
 
-// ── Topology ─────────────────────────────────────────────────────────────────
+// hostFromURI returns the bare host:port (or RS host list) from a connection
+// URI, stripping scheme, credentials and query string — for display only.
+func hostFromURI(uri string) string {
+	s := uri
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.LastIndex(s, "@"); i >= 0 {
+		s = s[i+1:]
+	}
+	if i := strings.IndexAny(s, "/?"); i >= 0 {
+		s = s[:i]
+	}
+	return s
+}
+
+// ── topology (continued) ───────────────────────────────────────────────────────
 
 // NodeInfo describes one addressable group in the cluster.
 type NodeInfo struct {
@@ -1935,6 +1951,35 @@ func handleGetRoles(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, roles)
 }
 
+// handleConnectionStatus — POST /api/user/connection-status
+// Returns the currently authenticated identity and effective roles as seen
+// by the connected server, via db.runCommand({connectionStatus: 1,
+// showPrivileges: true}). The frontend uses this to show a "Your Session"
+// card so the DBA can verify which identity their actions are running as
+// before they create/sync users or roles.
+func handleConnectionStatus(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	uri := formURI(r)
+	shardCreds := parseShardCredentials(r)
+	uri = applyShardCredentials(uri, shardCreds)
+
+	c, err := getClient(uri)
+	if err != nil { jsonErr(w, err.Error(), 500); return }
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var res bson.D
+	// showPrivileges adds the fully-resolved inheritedPrivileges array, which
+	// is what surfaces to the UI as "what can this session actually do" —
+	// otherwise we'd only see role names and have to chase them ourselves.
+	err = c.Database("admin").RunCommand(ctx, bson.D{
+		{Key: "connectionStatus", Value: 1},
+		{Key: "showPrivileges",   Value: true},
+	}).Decode(&res)
+	if err != nil { jsonErr(w, err.Error(), 500); return }
+	jsonOK(w, bsonToAny(res))
+}
+
 func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	uri := formURI(r)
@@ -2381,6 +2426,449 @@ func handleSetUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]string{"ok": "1", "message": "Roles updated for " + username})
+}
+
+// ─── Cross-shard user/role sync ───────────────────────────────────────────
+//
+// In a sharded cluster, cluster-wide users live on the config servers and are
+// federated via mongos, but each shard also has its own *local* user/role
+// store (used e.g. by replication and shard-local applications). When a DBA
+// creates a user/role on one shard's primary, the others don't see it. These
+// handlers help bring missing entries across.
+
+// formTargetURIs reads the multi-valued `targetUri` form field and applies
+// per-shard credentials to each URI. The frontend sends one form value per
+// target — commas can't be used as a separator because they appear inside
+// replica-set URIs (multi-host strings).
+func formTargetURIs(r *http.Request, creds map[string]struct{ username, password string }) []string {
+	raw := r.Form["targetUri"]
+	out := make([]string, 0, len(raw))
+	for _, t := range raw {
+		t = strings.TrimSpace(t)
+		if t == "" { continue }
+		out = append(out, applyShardCredentials(t, creds))
+	}
+	return out
+}
+
+// handleCheckPresence — POST /api/user/check-presence
+// Inputs: kind=user|role, name, db, targetUris (comma-separated)
+// Output: [{shardId, uri (masked), exists, error}]
+//
+// Used by the sync modal to populate the "missing on these shards" list
+// before the DBA confirms the push. Tolerates per-target errors: an
+// unreachable shard reports the error string rather than failing the call.
+func handleCheckPresence(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	kind   := strings.TrimSpace(r.FormValue("kind"))
+	name   := strings.TrimSpace(r.FormValue("name"))
+	dbName := strings.TrimSpace(r.FormValue("db"))
+	if (kind != "user" && kind != "role") || name == "" || dbName == "" {
+		jsonErr(w, "kind (user|role), name, db, targetUri[] required", 400)
+		return
+	}
+	shardCreds := parseShardCredentials(r)
+	targets := formTargetURIs(r, shardCreds)
+	if len(targets) == 0 {
+		jsonErr(w, "at least one targetUri required", 400)
+		return
+	}
+
+	type result struct {
+		ShardId string `json:"shardId"`
+		Uri     string `json:"uri"`
+		Exists  bool   `json:"exists"`
+		Error   string `json:"error,omitempty"`
+	}
+	results := make([]result, 0, len(targets))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, t := range targets {
+		res := result{ShardId: extractShardID(t), Uri: maskURI(t)}
+		c, err := getClient(t)
+		if err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
+		var cmd bson.D
+		if kind == "user" {
+			cmd = bson.D{{Key: "usersInfo", Value: bson.D{
+				{Key: "user", Value: name}, {Key: "db", Value: dbName},
+			}}}
+		} else {
+			cmd = bson.D{{Key: "rolesInfo", Value: bson.A{bson.D{
+				{Key: "role", Value: name}, {Key: "db", Value: dbName},
+			}}}}
+		}
+		var raw bson.D
+		if err := c.Database(dbName).RunCommand(ctx, cmd).Decode(&raw); err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
+		rm := bsonToAny(raw).(map[string]interface{})
+		key := "users"
+		if kind == "role" { key = "roles" }
+		if arr, ok := rm[key].([]interface{}); ok && len(arr) > 0 {
+			res.Exists = true
+		}
+		results = append(results, res)
+	}
+	jsonOK(w, results)
+}
+
+// handleSyncUser — POST /api/user/sync-user
+// Inputs: uri (source), username, password, db, targetUris (comma-separated)
+// Reads the user's role list from the source and creates the same user on
+// handleSyncUser — POST /api/user/sync-user
+// Inputs: uri (source), username, password (mode=plaintext only), db,
+//         targetUri[] (multi-valued), mode (optional: "plaintext" | "clone")
+//
+// Two modes:
+//
+//   plaintext (default) — the supported path. Reads the user's role list
+//     from `usersInfo` on the source and runs `createUser` on every target
+//     with the DBA-supplied plaintext password. Each shard ends up with its
+//     own SCRAM salt and hash for the same plaintext — perfectly fine for
+//     authentication; just not byte-identical credentials.
+//
+//   clone — the back-door path. Reads the full user document from the
+//     source (with showCredentials:true so the SCRAM-SHA-1/256 credentials,
+//     including iterationCount, salt, storedKey, and serverKey, are
+//     returned), then drives `_mergeAuthzCollections` on each target via a
+//     temporary collection (`admin.tempusers`). This is the same internal
+//     command mongorestore uses to import users with their hashes intact.
+//     Inserting into admin.system.users directly is *not* allowed, so the
+//     temp-collection + merge dance is the only way.
+//
+//   Privilege requirement for clone:
+//     The MongoAdmin session must have the built-in `restore` role on the
+//     target's admin database (or `__system`). `userAdminAnyDatabase` alone
+//     is not enough — `_mergeAuthzCollections` is restricted to backup/
+//     restore service accounts because it can overwrite *any* user or role
+//     on the target.
+//
+//   Security note for clone:
+//     Cloning bypasses createUser's password-strength enforcement (none
+//     today, but a guard nevertheless) and copies whatever auth state the
+//     source has — including SCRAM-SHA-1-only users that the rest of the
+//     deployment may have disabled. Use with care.
+func handleSyncUser(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	srcUri   := formURI(r)
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+	dbName   := strings.TrimSpace(r.FormValue("db"))
+	mode     := strings.TrimSpace(r.FormValue("mode"))
+	if mode == "" { mode = "plaintext" }
+	if mode != "plaintext" && mode != "clone" {
+		jsonErr(w, "mode must be 'plaintext' or 'clone'", 400)
+		return
+	}
+	if username == "" || dbName == "" {
+		jsonErr(w, "username, db, targetUri[] required", 400)
+		return
+	}
+	if mode == "plaintext" && password == "" {
+		jsonErr(w, "password required in plaintext mode", 400)
+		return
+	}
+
+	shardCreds := parseShardCredentials(r)
+	srcUri = applyShardCredentials(srcUri, shardCreds)
+	targets := formTargetURIs(r, shardCreds)
+	if len(targets) == 0 {
+		jsonErr(w, "at least one targetUri required", 400)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	srcClient, err := getClient(srcUri)
+	if err != nil { jsonErr(w, "source: "+err.Error(), 500); return }
+
+	type result struct {
+		ShardId string `json:"shardId"`
+		Uri     string `json:"uri"`
+		Ok      bool   `json:"ok"`
+		Updated bool   `json:"updated,omitempty"` // plaintext mode: updateUser ran instead of createUser
+		Skipped bool   `json:"skipped,omitempty"`
+		Error   string `json:"error,omitempty"`
+	}
+	results := make([]result, 0, len(targets))
+
+	if mode == "plaintext" {
+		updateIfExists := r.FormValue("updateIfExists") == "1"
+		// Standard path: copy role list only, re-hash a fresh password.
+		var rawSrc bson.D
+		err = srcClient.Database(dbName).RunCommand(ctx, bson.D{
+			{Key: "usersInfo", Value: bson.D{{Key: "user", Value: username}, {Key: "db", Value: dbName}}},
+		}).Decode(&rawSrc)
+		if err != nil { jsonErr(w, "fetch user: "+err.Error(), 500); return }
+
+		srcMap := bsonToAny(rawSrc).(map[string]interface{})
+		usersArr, ok := srcMap["users"].([]interface{})
+		if !ok || len(usersArr) == 0 {
+			jsonErr(w, "user '"+username+"' not found on source", 404)
+			return
+		}
+		roles := usersArr[0].(map[string]interface{})["roles"]
+		if roles == nil { roles = []interface{}{} }
+
+		for _, t := range targets {
+			res := result{ShardId: extractShardID(t), Uri: maskURI(t)}
+			c, err := getClient(t)
+			if err != nil {
+				res.Error = err.Error()
+				results = append(results, res)
+				continue
+			}
+			cmd := bson.D{
+				{Key: "createUser", Value: username},
+				{Key: "pwd",        Value: password},
+				{Key: "roles",      Value: roles},
+			}
+			var raw bson.D
+			if err := c.Database(dbName).RunCommand(ctx, cmd).Decode(&raw); err != nil {
+				if strings.Contains(err.Error(), "already exists") {
+					if updateIfExists {
+						// User exists; overwrite role list (and password) to
+						// match the source. This is the "drift-repair" path —
+						// the DBA explicitly opted in via the modal checkbox.
+						updateCmd := bson.D{
+							{Key: "updateUser", Value: username},
+							{Key: "roles",      Value: roles},
+							{Key: "pwd",        Value: password},
+						}
+						var uRaw bson.D
+						if uerr := c.Database(dbName).RunCommand(ctx, updateCmd).Decode(&uRaw); uerr != nil {
+							res.Error = "update failed: " + uerr.Error()
+						} else {
+							res.Ok      = true
+							res.Updated = true
+						}
+					} else {
+						res.Skipped = true
+					}
+				} else {
+					res.Error = err.Error()
+				}
+			} else {
+				res.Ok = true
+			}
+			results = append(results, res)
+		}
+		jsonOK(w, results)
+		return
+	}
+
+	// ── clone mode: _mergeAuthzCollections via temp collection ───────────
+	// 1. Fetch the full user doc *with credentials* from the source. The
+	//    response from usersInfo with showCredentials:true is at users[0]
+	//    and contains _id, user, db, credentials, roles, etc. We pass that
+	//    same shape into admin.tempusers on each target.
+	var rawSrc bson.D
+	err = srcClient.Database(dbName).RunCommand(ctx, bson.D{
+		{Key: "usersInfo",       Value: bson.D{{Key: "user", Value: username}, {Key: "db", Value: dbName}}},
+		{Key: "showCredentials", Value: true},
+	}).Decode(&rawSrc)
+	if err != nil { jsonErr(w, "fetch user with credentials: "+err.Error(), 500); return }
+
+	srcMap := bsonToAny(rawSrc).(map[string]interface{})
+	usersArr, ok := srcMap["users"].([]interface{})
+	if !ok || len(usersArr) == 0 {
+		jsonErr(w, "user '"+username+"' not found on source", 404)
+		return
+	}
+	userDoc, _ := usersArr[0].(map[string]interface{})
+	if userDoc == nil || userDoc["credentials"] == nil {
+		jsonErr(w, "source returned no credentials — does the connected user have viewUser or showCredentials permission?", 403)
+		return
+	}
+
+	// Reshape the user document for the merge. _mergeAuthzCollections expects
+	// a doc that looks like admin.system.users: keys _id, user, db, credentials,
+	// roles, and optional customData / authenticationRestrictions. We drop
+	// userId (server regenerates it) and any other transient fields.
+	mergeDoc := bson.M{
+		"_id":         userDoc["_id"],
+		"user":        userDoc["user"],
+		"db":          userDoc["db"],
+		"credentials": userDoc["credentials"],
+		"roles":       userDoc["roles"],
+	}
+	// Sometimes _id isn't returned by usersInfo; reconstruct it as "<db>.<user>".
+	if mergeDoc["_id"] == nil {
+		mergeDoc["_id"] = fmt.Sprintf("%s.%s", dbName, username)
+	}
+	if cd, exists := userDoc["customData"]; exists && cd != nil {
+		mergeDoc["customData"] = cd
+	}
+	if ar, exists := userDoc["authenticationRestrictions"]; exists && ar != nil {
+		mergeDoc["authenticationRestrictions"] = ar
+	}
+
+	// Use a unique temp collection per call to avoid collisions if two DBAs
+	// run sync simultaneously. mongorestore uses "admin.tempusers" as a
+	// well-known name, but it doesn't tolerate concurrent runs — we generate
+	// a per-request suffix so concurrent syncs don't trample each other.
+	suffix        := time.Now().UnixNano()
+	tempUsersColl := fmt.Sprintf("tempusers_%d", suffix)
+	tempRolesColl := fmt.Sprintf("temproles_%d", suffix)
+
+	for _, t := range targets {
+		res := result{ShardId: extractShardID(t), Uri: maskURI(t)}
+		c, err := getClient(t)
+		if err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
+		adminDb   := c.Database("admin")
+		usersColl := adminDb.Collection(tempUsersColl)
+		rolesColl := adminDb.Collection(tempRolesColl)
+
+		// Best-effort cleanup of any stale collections from a previous failed
+		// attempt — ignore errors since they usually won't exist.
+		_ = usersColl.Drop(ctx)
+		_ = rolesColl.Drop(ctx)
+
+		if _, ierr := usersColl.InsertOne(ctx, mergeDoc); ierr != nil {
+			res.Error = "insert temp user doc: " + ierr.Error()
+			results = append(results, res)
+			continue
+		}
+		// Modern MongoDB requires `tempRolesCollection` to be set even when
+		// we're only merging users (the IDL parser is strict about it). Pass
+		// an empty collection so the role-merge portion is a no-op.
+		// See mongo-tools JIRA TOOLS-2946 for the historical rationale.
+		_ = adminDb.CreateCollection(ctx, tempRolesColl)
+
+		// drop:false → merge with existing users (doesn't wipe other accounts).
+		// drop:true would replace the entire authoritative user set on the
+		// target — never what an interactive sync wants.
+		// `db` scopes the merge to user docs whose stored `db` field matches.
+		// MongoDB 7.0+ rejects the command without it (IDLFailedToParse).
+		// See https://pkg.go.dev/github.com/mongodb/mongo-tools/mongorestore.
+		mergeCmd := bson.D{
+			{Key: "_mergeAuthzCollections", Value: 1},
+			{Key: "db",                     Value: dbName},
+			{Key: "tempUsersCollection",    Value: "admin." + tempUsersColl},
+			{Key: "tempRolesCollection",    Value: "admin." + tempRolesColl},
+			{Key: "drop",                   Value: false},
+			{Key: "writeConcern",           Value: bson.D{{Key: "w", Value: "majority"}}},
+		}
+		var raw bson.D
+		merr := adminDb.RunCommand(ctx, mergeCmd).Decode(&raw)
+		// Always drop both temp collections, regardless of merge result.
+		_ = usersColl.Drop(ctx)
+		_ = rolesColl.Drop(ctx)
+
+		if merr != nil {
+			if strings.Contains(merr.Error(), "already exists") ||
+				strings.Contains(merr.Error(), "duplicate key") {
+				res.Skipped = true
+			} else {
+				res.Error = merr.Error()
+			}
+		} else {
+			res.Ok = true
+		}
+		results = append(results, res)
+	}
+	jsonOK(w, results)
+}
+
+// handleSyncRole — POST /api/user/sync-role
+// Inputs: uri (source), roleName, db, targetUris (comma-separated)
+// Reads the role's privileges + inheritedRoles from the source and creates
+// it on every target. Unlike users, no password is needed.
+func handleSyncRole(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	srcUri   := formURI(r)
+	roleName := strings.TrimSpace(r.FormValue("roleName"))
+	dbName   := strings.TrimSpace(r.FormValue("db"))
+	if roleName == "" || dbName == "" {
+		jsonErr(w, "roleName, db, targetUri[] required", 400)
+		return
+	}
+
+	shardCreds := parseShardCredentials(r)
+	srcUri = applyShardCredentials(srcUri, shardCreds)
+	targets := formTargetURIs(r, shardCreds)
+	if len(targets) == 0 {
+		jsonErr(w, "at least one targetUri required", 400)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Fetch source role definition with privileges.
+	srcClient, err := getClient(srcUri)
+	if err != nil { jsonErr(w, "source: "+err.Error(), 500); return }
+	var rawSrc bson.D
+	err = srcClient.Database(dbName).RunCommand(ctx, bson.D{
+		{Key: "rolesInfo", Value: bson.A{bson.D{{Key: "role", Value: roleName}, {Key: "db", Value: dbName}}}},
+		{Key: "showPrivileges", Value: true},
+	}).Decode(&rawSrc)
+	if err != nil { jsonErr(w, "fetch role: "+err.Error(), 500); return }
+
+	srcMap := bsonToAny(rawSrc).(map[string]interface{})
+	rolesArr, ok := srcMap["roles"].([]interface{})
+	if !ok || len(rolesArr) == 0 {
+		jsonErr(w, "role '"+roleName+"' not found on source", 404)
+		return
+	}
+	role := rolesArr[0].(map[string]interface{})
+	if b, _ := role["isBuiltin"].(bool); b {
+		jsonErr(w, "cannot sync built-in roles", 400)
+		return
+	}
+	privileges := role["privileges"]
+	if privileges == nil { privileges = []interface{}{} }
+	inheritedRoles := role["inheritedRoles"]
+	if inheritedRoles == nil { inheritedRoles = []interface{}{} }
+
+	type result struct {
+		ShardId string `json:"shardId"`
+		Uri     string `json:"uri"`
+		Ok      bool   `json:"ok"`
+		Skipped bool   `json:"skipped,omitempty"`
+		Error   string `json:"error,omitempty"`
+	}
+	results := make([]result, 0, len(targets))
+
+	for _, t := range targets {
+		res := result{ShardId: extractShardID(t), Uri: maskURI(t)}
+		c, err := getClient(t)
+		if err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
+		cmd := bson.D{
+			{Key: "createRole", Value: roleName},
+			{Key: "privileges", Value: privileges},
+			{Key: "roles",      Value: inheritedRoles},
+		}
+		var raw bson.D
+		if err := c.Database(dbName).RunCommand(ctx, cmd).Decode(&raw); err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				res.Skipped = true
+			} else {
+				res.Error = err.Error()
+			}
+		} else {
+			res.Ok = true
+		}
+		results = append(results, res)
+	}
+	jsonOK(w, results)
 }
 
 // handleUpdateRole replaces inherited roles + privileges on a custom role.
@@ -2849,9 +3337,11 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 	if len(rsURIs) == 0 { rsURIs = []string{formURI(r)} }
 
 	type MemberLag struct {
-		Host      string  `json:"host"`
-		State     string  `json:"state"`
-		LagSecs   float64 `json:"lagSecs"`
+		Host       string  `json:"host"`
+		State      string  `json:"state"`
+		LagSecs    float64 `json:"lagSecs"`
+		OptimeTS   int64   `json:"optimeTS"`   // applied optime — seconds component of the BSON timestamp
+		OptimeDate string  `json:"optimeDate"` // applied optime — wall-clock date (RFC3339)
 	}
 	type RSOplog struct {
 		SetName     string      `json:"setName"`
@@ -2860,6 +3350,12 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 		UsedMB      int64       `json:"usedMB"`
 		UsedPct     float64     `json:"usedPct"`
 		WindowHours float64     `json:"windowHours"`
+		FirstTS     int64       `json:"firstTS"`     // oldest oplog entry — unix seconds (UTC)
+		LastTS      int64       `json:"lastTS"`      // newest oplog entry — unix seconds (UTC)
+		Count       int64       `json:"count"`       // oplog.rs document count
+		AvgObjSize  float64     `json:"avgObjSize"`  // average oplog entry size, bytes
+		WriteRateMB float64     `json:"writeRateMB"` // average oplog write rate, MB/hour
+		EstRetHours float64     `json:"estRetHours"` // estimated retention once the oplog is full, hours
 		Members     []MemberLag `json:"members"`
 		Error       string      `json:"error,omitempty"`
 	}
@@ -2916,25 +3412,41 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
-					result.Members = append(result.Members, MemberLag{Host: host, State: state, LagSecs: lag})
+					ml := MemberLag{Host: host, State: state, LagSecs: lag}
+					// replSetGetStatus → members[].optime is the applied optime for
+					// that member (what the connected node reports as optimes.appliedOpTime
+					// for itself). The seconds component shows exactly where each
+					// secondary has caught up to in the oplog stream.
+					if ot := toMap(mm["optime"]); ot != nil {
+						ml.OptimeTS = tsSecondsFromAny(ot["ts"])
+					}
+					if od, ok := mm["optimeDate"].(string); ok {
+						ml.OptimeDate = od
+					}
+					result.Members = append(result.Members, ml)
 				}
 			}
 
-			// Oplog collection stats
+			// Oplog collection stats. We request scale=1 (bytes) and convert to
+			// MB ourselves: a MB scale would also divide avgObjSize, rendering it
+			// useless, and count must stay as a raw document count.
 			var raw bson.D
 			if err2 := c.Database("local").RunCommand(ctx, bson.D{
 				{Key: "collStats", Value: "oplog.rs"},
-				{Key: "scale", Value: 1024 * 1024}, // MB
+				{Key: "scale", Value: 1},
 			}).Decode(&raw); err2 == nil {
 				m := bsonToAny(raw).(map[string]interface{})
-				result.SizeMB    = toInt64(m["maxSize"])
-				result.UsedMB    = toInt64(m["size"])
+				const mb = 1024 * 1024
+				result.SizeMB     = toInt64(m["maxSize"]) / mb
+				result.UsedMB     = toInt64(m["size"]) / mb
+				result.Count      = toInt64(m["count"])
+				result.AvgObjSize = toFloat64(m["avgObjSize"])
 				if result.SizeMB > 0 {
 					result.UsedPct = float64(result.UsedMB) / float64(result.SizeMB) * 100
 				}
 			}
 
-			// Oplog window: time diff between first and last entry
+			// Oplog window: time diff between first and last entry.
 			firstCur, err2 := c.Database("local").Collection("oplog.rs").Find(ctx,
 				bson.D{}, &options.FindOptions{
 					Limit: func() *int64 { v := int64(1); return &v }(),
@@ -2950,23 +3462,30 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 				},
 			)
 			if err2 == nil && err3 == nil {
-				var firstDoc, lastDoc bson.D
+				// Decode the BSON Timestamp directly into a typed struct. Routing
+				// it through bsonToAny() (which boxes the timestamp into a
+				// map[string]uint32) was the reason the window always read 0.
+				type oplogTS struct {
+					Ts primitive.Timestamp `bson:"ts"`
+				}
+				var firstDoc, lastDoc oplogTS
 				if firstCur.Next(ctx) { firstCur.Decode(&firstDoc) }
 				if lastCur.Next(ctx)  { lastCur.Decode(&lastDoc) }
 				firstCur.Close(ctx); lastCur.Close(ctx)
-				fm := bsonToAny(firstDoc).(map[string]interface{})
-				lm := bsonToAny(lastDoc).(map[string]interface{})
-				// ts comes back as {"$timestamp":{"t":N,"i":N}}
-				getTs := func(m map[string]interface{}) int64 {
-					if ts := toMap(m["ts"]); ts != nil {
-						if inner := toMap(ts["$timestamp"]); inner != nil {
-							return toInt64(inner["t"])
+				ft, lt := int64(firstDoc.Ts.T), int64(lastDoc.Ts.T)
+				result.FirstTS = ft
+				result.LastTS  = lt
+				if lt > ft {
+					result.WindowHours = float64(lt-ft) / 3600
+					// Average write rate (MB/h) over the window and the projected
+					// retention once the oplog reaches its configured max size.
+					if result.WindowHours > 0 && result.UsedMB > 0 {
+						result.WriteRateMB = float64(result.UsedMB) / result.WindowHours
+						if result.WriteRateMB > 0 && result.SizeMB > 0 {
+							result.EstRetHours = float64(result.SizeMB) / result.WriteRateMB
 						}
 					}
-					return 0
 				}
-				ft, lt := getTs(fm), getTs(lm)
-				if lt > ft { result.WindowHours = float64(lt-ft) / 3600 }
 			}
 
 			mu.Lock()
@@ -2977,6 +3496,130 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	sort.Slice(results, func(i, j int) bool { return results[i].SetName < results[j].SetName })
 	jsonOK(w, results)
+}
+
+// ── Oplog Write Analysis ───────────────────────────────────────────────────────
+// Per-collection breakdown of recent oplog write volume on a single member.
+//
+// NOTE ON THE TIME FILTER: the "obvious" approach of comparing $ts (a BSON
+// Timestamp) against a Date built from $$NOW does NOT work — in MongoDB's BSON
+// type ordering a Timestamp always sorts AFTER a Date, so $gte:["$ts", <Date>]
+// is unconditionally true and the pipeline would silently scan the entire
+// oplog instead of the last N minutes. Instead we anchor to the oplog's own
+// clock: take the newest entry's timestamp seconds and build a Timestamp lower
+// bound at (newest - minutes*60). That filter is both correct and efficient,
+// because oplog.rs is naturally ordered by ts.
+//
+// $bsonSize requires MongoDB 4.4+. On older servers the aggregation will return
+// an error, which is surfaced verbatim to the UI.
+func handleOplogAnalyze(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	uri := formURI(r)
+	if uri == "" { jsonErr(w, "uri required", 400); return }
+
+	shardCreds := parseShardCredentials(r)
+	uri = applyShardCredentials(uri, shardCreds)
+
+	minutes := 10
+	if v := strings.TrimSpace(r.FormValue("minutes")); v != "" {
+		var n int
+		if c, err := fmt.Sscanf(v, "%d", &n); c == 1 && err == nil { minutes = n }
+	}
+	if minutes < 1 { minutes = 1 }
+	if minutes > 1440 { minutes = 1440 }
+
+	limit := 15
+	if v := strings.TrimSpace(r.FormValue("limit")); v != "" {
+		var n int
+		if c, err := fmt.Sscanf(v, "%d", &n); c == 1 && err == nil { limit = n }
+	}
+	if limit < 1 { limit = 1 }
+	if limit > 50 { limit = 50 }
+
+	c, err := getClient(uri)
+	if err != nil { jsonErr(w, err.Error(), 500); return }
+	// This query can be heavy on a busy primary, so give it room but keep a cap.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	coll := c.Database("local").Collection("oplog.rs")
+
+	// Newest entry → anchor for the time window (oplog clock, not wall clock).
+	type oplogTS struct {
+		Ts primitive.Timestamp `bson:"ts"`
+	}
+	var newest oplogTS
+	{
+		cur, e := coll.Find(ctx, bson.D{}, &options.FindOptions{
+			Limit:      func() *int64 { v := int64(1); return &v }(),
+			Sort:       bson.D{{Key: "$natural", Value: -1}},
+			Projection: bson.D{{Key: "ts", Value: 1}},
+		})
+		if e != nil { jsonErr(w, e.Error(), 500); return }
+		if cur.Next(ctx) { cur.Decode(&newest) }
+		cur.Close(ctx)
+	}
+	if newest.Ts.T == 0 {
+		jsonOK(w, map[string]interface{}{
+			"ok": "1", "minutes": minutes, "from": 0, "to": 0,
+			"collections": []interface{}{},
+		})
+		return
+	}
+
+	lowerSecs := int64(newest.Ts.T) - int64(minutes)*60
+	if lowerSecs < 0 { lowerSecs = 0 }
+	lower := primitive.Timestamp{T: uint32(lowerSecs), I: 0}
+
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.D{
+			{Key: "ts", Value: bson.D{{Key: "$gte", Value: lower}}},
+			{Key: "op", Value: bson.D{{Key: "$in", Value: bson.A{"i", "u", "d", "c"}}}},
+		}}},
+		bson.D{{Key: "$addFields", Value: bson.D{
+			{Key: "entrySizeBytes", Value: bson.D{{Key: "$bsonSize", Value: "$$ROOT"}}},
+		}}},
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$ns"},
+			{Key: "totalBytes", Value: bson.D{{Key: "$sum", Value: "$entrySizeBytes"}}},
+			{Key: "operationCount", Value: bson.D{{Key: "$sum", Value: 1}}},
+		}}},
+		bson.D{{Key: "$project", Value: bson.D{
+			{Key: "collection", Value: "$_id"},
+			{Key: "totalMB", Value: bson.D{{Key: "$round", Value: bson.A{
+				bson.D{{Key: "$divide", Value: bson.A{"$totalBytes", 1048576}}}, 2,
+			}}}},
+			{Key: "operationCount", Value: 1},
+			{Key: "avgSizeKB", Value: bson.D{{Key: "$round", Value: bson.A{
+				bson.D{{Key: "$divide", Value: bson.A{
+					bson.D{{Key: "$divide", Value: bson.A{"$totalBytes", "$operationCount"}}}, 1024,
+				}}}, 2,
+			}}}},
+		}}},
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "totalMB", Value: -1}}}},
+		bson.D{{Key: "$limit", Value: limit}},
+	}
+
+	cur, err := coll.Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(true))
+	if err != nil { jsonErr(w, err.Error(), 500); return }
+	defer cur.Close(ctx)
+
+	type CollOplog struct {
+		Collection     string  `bson:"collection" json:"collection"`
+		TotalMB        float64 `bson:"totalMB"    json:"totalMB"`
+		OperationCount int64   `bson:"operationCount" json:"operationCount"`
+		AvgSizeKB      float64 `bson:"avgSizeKB"  json:"avgSizeKB"`
+	}
+	rows := []CollOplog{}
+	if err := cur.All(ctx, &rows); err != nil { jsonErr(w, err.Error(), 500); return }
+
+	jsonOK(w, map[string]interface{}{
+		"ok":          "1",
+		"minutes":     minutes,
+		"from":        lowerSecs,
+		"to":          int64(newest.Ts.T),
+		"collections": rows,
+	})
 }
 
 // ── Slow Query Profiler ───────────────────────────────────────────────────────
@@ -3008,6 +3651,8 @@ func handleSetProfilingLevel(w http.ResponseWriter, r *http.Request) {
 	fmt.Sscanf(r.FormValue("level"), "%d", &level)
 	slowMs := int64(100)
 	fmt.Sscanf(r.FormValue("slowMs"), "%d", &slowMs)
+	sampleRateStr := strings.TrimSpace(r.FormValue("sampleRate"))
+	filterJSON    := strings.TrimSpace(r.FormValue("filter"))
 	if dbName == "" { jsonErr(w, "db required", 400); return }
 
 	shardCreds := parseShardCredentials(r)
@@ -3017,7 +3662,40 @@ func handleSetProfilingLevel(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := bson.D{{Key: "profile", Value: level}, {Key: "slowms", Value: slowMs}}
+	// db.runCommand({profile: level, slowms: …, sampleRate: …, filter: …})
+	// slowms is always sent so its current UI value sticks. sampleRate and
+	// filter are sent only when the client opts in — that keeps existing
+	// server-side values intact when the user is only tweaking level/slowms.
+	cmd := bson.D{
+		{Key: "profile", Value: level},
+		{Key: "slowms",  Value: slowMs},
+	}
+
+	if sampleRateStr != "" {
+		var sr float64
+		if _, perr := fmt.Sscanf(sampleRateStr, "%f", &sr); perr == nil {
+			if sr < 0 { sr = 0 }
+			if sr > 1 { sr = 1 }
+			cmd = append(cmd, bson.E{Key: "sampleRate", Value: sr})
+		}
+	}
+
+	// filter accepts either a query document (JSON object) or the literal
+	// string "unset" which removes the stored filter — see
+	// https://www.mongodb.com/docs/v7.0/reference/method/db.setProfilingLevel/
+	if filterJSON != "" {
+		if filterJSON == "unset" || filterJSON == "\"unset\"" {
+			cmd = append(cmd, bson.E{Key: "filter", Value: "unset"})
+		} else {
+			var fmap map[string]interface{}
+			if jerr := json.Unmarshal([]byte(filterJSON), &fmap); jerr != nil {
+				jsonErr(w, "invalid filter JSON: "+jerr.Error(), 400)
+				return
+			}
+			cmd = append(cmd, bson.E{Key: "filter", Value: fmap})
+		}
+	}
+
 	var res bson.D
 	err = c.Database(dbName).RunCommand(ctx, cmd).Decode(&res)
 	if err != nil { jsonErr(w, err.Error(), 500); return }
@@ -3026,13 +3704,20 @@ func handleSetProfilingLevel(w http.ResponseWriter, r *http.Request) {
 
 func handleProfilerEntries(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	uri     := formURI(r)
-	dbName  := strings.TrimSpace(r.FormValue("db"))
-	ns      := strings.TrimSpace(r.FormValue("ns"))
-	op      := strings.TrimSpace(r.FormValue("op"))
-	minMs   := int64(0)
+	uri              := formURI(r)
+	dbName           := strings.TrimSpace(r.FormValue("db"))
+	ns               := strings.TrimSpace(r.FormValue("ns"))
+	op               := strings.TrimSpace(r.FormValue("op"))
+	cmdType          := strings.TrimSpace(r.FormValue("cmdType"))
+	planSummary      := strings.TrimSpace(r.FormValue("planSummary"))
+	impUser          := strings.TrimSpace(r.FormValue("user"))
+	minMs            := int64(0)
 	fmt.Sscanf(r.FormValue("minMs"), "%d", &minMs)
-	limit   := int64(100)
+	minDocsExamined  := int64(0)
+	fmt.Sscanf(r.FormValue("minDocsExamined"), "%d", &minDocsExamined)
+	minCpuMs         := int64(0)
+	fmt.Sscanf(r.FormValue("minCpuMs"), "%d", &minCpuMs)
+	limit            := int64(100)
 	fmt.Sscanf(r.FormValue("limit"), "%d", &limit)
 	if limit > 500 { limit = 500 }
 
@@ -3044,9 +3729,87 @@ func handleProfilerEntries(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	filter := bson.D{}
-	if minMs > 0 { filter = append(filter, bson.E{Key: "millis", Value: bson.D{{Key: "$gte", Value: minMs}}}) }
-	if ns != ""  { filter = append(filter, bson.E{Key: "ns", Value: bson.D{{Key: "$regex", Value: ns}}}) }
-	if op != ""  { filter = append(filter, bson.E{Key: "op", Value: op}) }
+	if minMs > 0 {
+		filter = append(filter, bson.E{Key: "millis", Value: bson.D{{Key: "$gte", Value: minMs}}})
+	}
+	if minDocsExamined > 0 {
+		filter = append(filter, bson.E{Key: "docsExamined", Value: bson.D{{Key: "$gte", Value: minDocsExamined}}})
+	}
+	if minCpuMs > 0 {
+		// cpuNanos is stored in nanoseconds; convert the UI's ms input.
+		filter = append(filter, bson.E{Key: "cpuNanos", Value: bson.D{{Key: "$gte", Value: minCpuMs * 1_000_000}}})
+	}
+	if ns != "" {
+		filter = append(filter, bson.E{Key: "ns", Value: bson.D{{Key: "$regex", Value: regexp.QuoteMeta(ns)}}})
+	}
+	if op != "" {
+		filter = append(filter, bson.E{Key: "op", Value: op})
+	}
+	if planSummary != "" {
+		// Anchor at start so "IXSCAN" matches `IXSCAN { age: 1 }` etc.
+		filter = append(filter, bson.E{Key: "planSummary", Value: bson.D{
+			{Key: "$regex", Value: "^" + regexp.QuoteMeta(planSummary)},
+			{Key: "$options", Value: "i"},
+		}})
+	}
+	if impUser != "" {
+		// The user behind a profiled op may live in several places depending
+		// on MongoDB version and sharded vs. plain RS:
+		//   - command.$audit.$impersonatedUser.user — mongos forwarded with impersonation
+		//   - effectiveUsers[].user — modern (5.0+) auth representation on the entry itself
+		//   - user — older single-string form
+		// Use a regex-contains match so the input is forgiving (case-insensitive).
+		userRx := bson.D{
+			{Key: "$regex", Value: regexp.QuoteMeta(impUser)},
+			{Key: "$options", Value: "i"},
+		}
+		filter = append(filter, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "command.$audit.$impersonatedUser.user", Value: userRx}},
+			bson.D{{Key: "effectiveUsers.user", Value: userRx}},
+			bson.D{{Key: "user", Value: userRx}},
+		}})
+	}
+	if cmdType != "" {
+		// Map a user-friendly command name to legacy `op` values plus the
+		// modern `command.<name>` first-key form, OR'd together. Profile
+		// entries for sharded clusters almost always use op="command" with
+		// the actual command name as the first key of `command`.
+		ct := strings.ToLower(cmdType)
+		var clauses bson.A
+		add := func(d bson.D) { clauses = append(clauses, d) }
+		exists := func(key string) bson.D {
+			return bson.D{{Key: key, Value: bson.D{{Key: "$exists", Value: true}}}}
+		}
+		switch ct {
+		case "find":
+			add(bson.D{{Key: "op", Value: "query"}})
+			add(exists("command.find"))
+		case "aggregate":
+			add(exists("command.aggregate"))
+		case "count":
+			add(exists("command.count"))
+		case "distinct":
+			add(exists("command.distinct"))
+		case "findandmodify":
+			add(exists("command.findAndModify"))
+			add(exists("command.findandmodify"))
+		case "update":
+			add(bson.D{{Key: "op", Value: "update"}})
+			add(exists("command.update"))
+		case "delete", "remove":
+			add(bson.D{{Key: "op", Value: "remove"}})
+			add(exists("command.delete"))
+		case "insert":
+			add(bson.D{{Key: "op", Value: "insert"}})
+			add(exists("command.insert"))
+		case "getmore":
+			add(bson.D{{Key: "op", Value: "getmore"}})
+			add(exists("command.getMore"))
+		}
+		if len(clauses) > 0 {
+			filter = append(filter, bson.E{Key: "$or", Value: clauses})
+		}
+	}
 
 	cur, err := c.Database(dbName).Collection("system.profile").Find(ctx, filter,
 		&options.FindOptions{
@@ -3110,16 +3873,51 @@ func handleExplain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drop session / cluster / routing / API metadata. These are added by the
-	// driver and the server rejects them when wrapped in explain.
+	// driver or by mongos when forwarding the request to a shard, and the
+	// server rejects (or mis-routes) them when wrapped in explain.
+	// writeConcern is specifically rejected by aggregate-explain ("Aggregation
+	// explain does not support the 'writeConcern' option") and is meaningless
+	// for any explain (explain never writes), so it's always stripped.
 	for _, k := range []string{
 		"lsid", "$clusterTime", "$db", "$audit", "$readPreference", "$client",
 		"$configServerState", "$queryOptions",
+		"$configTime", "$topologyTime",
 		"txnNumber", "autocommit", "startTransaction", "signature",
 		"apiVersion", "apiStrict", "apiDeprecationErrors",
 		"needsMerge", "fromMongos", "mayBypassWriteBlocking", "useBypassDocumentValidation",
+		"shardVersion", "databaseVersion", "requestGossipRoutingCache",
+		"maxTimeMSOpOnly",
+		"writeConcern",
+		"clientOperationKey",
 		"$readOnce", "readOnce",
 	} {
 		delete(cmdMap, k)
+	}
+
+	// The `let` block is legitimate user-facing functionality (lets you bind
+	// variables visible to aggregation/find expressions as `$$name`), but
+	// mongos also uses it internally to ferry reserved system variables —
+	// CLUSTER_TIME, NOW, etc. — to shards. Those names are reserved at the
+	// server; any attempt to set them via let yields:
+	//   (Location4738901) Attempt to set internal constant: CLUSTER_TIME
+	// Strip the reserved keys while keeping any user-supplied variables. If
+	// nothing user-supplied remains, drop the let block entirely.
+	if letField, ok := cmdMap["let"]; ok {
+		if letMap, ok := letField.(map[string]interface{}); ok {
+			reserved := []string{
+				"NOW", "CLUSTER_TIME", "JS_SCOPE", "IS_MR", "USER_ROLES",
+				"ROOT", "CURRENT", "REMOVE", "DESCEND", "PRUNE", "KEEP",
+				"SEARCH_META",
+			}
+			for _, k := range reserved {
+				delete(letMap, k)
+			}
+			if len(letMap) == 0 {
+				delete(cmdMap, "let")
+			} else {
+				cmdMap["let"] = letMap
+			}
+		}
 	}
 
 	// Locate the explainable op (case-insensitive). Order of preference is
@@ -3185,10 +3983,27 @@ func handleExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Aggregate explain refuses to run when a cursor field is present in the
-	// inner command — strip it for safety.
+	// Aggregate-specific guard: a profile entry whose pipeline starts with
+	// $mergeCursors is the post-merge fragment recorded on the merging shard
+	// of a sharded aggregate. The $mergeCursors stage holds cursor IDs from
+	// the original cross-shard execution — those cursors no longer exist, so
+	// the pipeline cannot be re-executed or re-explained. Refuse early with a
+	// clear message instead of letting the server return a cryptic parse
+	// error. Note: cursor field is intentionally NOT stripped — aggregate
+	// accepts cursor under the explain wrapper, and keeping it protects
+	// against the case where mongos unfolds explain into the embedded form
+	// and the inner command is then parsed as a plain aggregate.
 	if strings.EqualFold(primaryKey, "aggregate") {
-		delete(cmdMap, "cursor")
+		if pipeline, ok := cmdMap["pipeline"].([]interface{}); ok && len(pipeline) > 0 {
+			if firstStage, ok := pipeline[0].(map[string]interface{}); ok {
+				if _, hasMC := firstStage["$mergeCursors"]; hasMC {
+					jsonErr(w,
+						"this profile entry is the post-merge fragment of a sharded aggregate (recorded on the merging shard); its pipeline starts with $mergeCursors which references cursor IDs from past execution on other shards. Those cursors are gone, so the pipeline cannot be re-explained. To explain the original query, run it against your mongos directly (e.g. db.collection.explain('executionStats').aggregate([...])).",
+						400)
+					return
+				}
+			}
+		}
 	}
 
 	// Build the inner command with the primary op first (required), then the
@@ -3227,6 +4042,206 @@ func handleGetLog(w http.ResponseWriter, r *http.Request) {
 	res, err := runCmd(uri, "admin", bson.D{{Key: "getLog", Value: kind}})
 	if err != nil { jsonErr(w, err.Error(), 500); return }
 	jsonOK(w, res)
+}
+
+// ── Security Status ───────────────────────────────────────────────────────────
+// Per-node authentication posture (is access control enabled?) plus
+// authentication-mechanism usage counters from serverStatus. Works for
+// standalone, replica set, and sharded topologies: the frontend passes the set
+// of nodes to inspect via node_uri[]/node_id[]/node_role[]; if none are given
+// we fall back to the single connection URI (standalone).
+
+type SecMechStat struct {
+	Mechanism         string `json:"mechanism"`
+	AuthReceived      int64  `json:"authReceived"`
+	AuthSuccessful    int64  `json:"authSuccessful"`
+	SpecReceived      int64  `json:"specReceived"`
+	SpecSuccessful    int64  `json:"specSuccessful"`
+	ClusterReceived   int64  `json:"clusterReceived"`
+	ClusterSuccessful int64  `json:"clusterSuccessful"`
+}
+
+type SecNode struct {
+	ID              string        `json:"id"`
+	Role            string        `json:"role"`
+	Host            string        `json:"host"`
+	AuthEnabled     bool          `json:"authEnabled"`
+	Authorization   string        `json:"authorization"`
+	KeyFile         bool          `json:"keyFile"`
+	ClusterAuthMode string        `json:"clusterAuthMode"`
+	TLSMode         string        `json:"tlsMode"`
+	Detected        string        `json:"detected"`
+	Version         string        `json:"version"`
+	Mechanisms      []SecMechStat `json:"mechanisms"`
+	Error           string        `json:"error,omitempty"`
+}
+
+func handleSecurityStatus(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	shardCreds := parseShardCredentials(r)
+
+	ids := r.Form["node_id"]
+	roles := r.Form["node_role"]
+	uris := r.Form["node_uri"]
+
+	type target struct{ id, role, uri string }
+	var targets []target
+	for i, u := range uris {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		t := target{uri: u}
+		if i < len(ids) {
+			t.id = ids[i]
+		}
+		if i < len(roles) {
+			t.role = roles[i]
+		}
+		targets = append(targets, t)
+	}
+	// Standalone / fallback: no node list supplied → inspect the connection URI.
+	if len(targets) == 0 {
+		if u := formURI(r); u != "" {
+			targets = append(targets, target{id: "standalone", role: "standalone", uri: u})
+		}
+	}
+	if len(targets) == 0 {
+		jsonErr(w, "uri required", 400)
+		return
+	}
+
+	var mu sync.Mutex
+	var nodes []SecNode
+	var wg sync.WaitGroup
+
+	for _, t := range targets {
+		wg.Add(1)
+		go func(t target) {
+			defer wg.Done()
+			finalURI := applyShardCredentials(t.uri, shardCreds)
+			node := SecNode{
+				ID: t.id, Role: t.role, Host: hostFromURI(t.uri),
+				Authorization: "<not set>", Mechanisms: []SecMechStat{},
+			}
+			if node.ID == "" {
+				node.ID = node.Host
+			}
+
+			// ── Authentication posture via getCmdLineOpts ──
+			opts, err := runCmd(finalURI, "admin", bson.D{{Key: "getCmdLineOpts", Value: 1}})
+			if err != nil {
+				le := strings.ToLower(err.Error())
+				if strings.Contains(le, "not authorized") || strings.Contains(le, "unauthorized") ||
+					strings.Contains(le, "requires authentication") || strings.Contains(le, "authentication failed") {
+					// The command itself is gated → access control IS enabled.
+					node.AuthEnabled = true
+					node.Authorization = "enabled (inferred)"
+					node.Detected = "command blocked — authentication required"
+				} else {
+					node.Error = err.Error()
+					mu.Lock()
+					nodes = append(nodes, node)
+					mu.Unlock()
+					return
+				}
+			} else {
+				hasAuthFlag := false
+				for _, a := range toSlice(opts["argv"]) {
+					if s, _ := a.(string); s == "--auth" {
+						hasAuthFlag = true
+					}
+				}
+				if parsed := toMap(opts["parsed"]); parsed != nil {
+					if sec := toMap(parsed["security"]); sec != nil {
+						if az, ok := sec["authorization"].(string); ok && az != "" {
+							node.Authorization = az
+							if strings.EqualFold(az, "enabled") {
+								node.AuthEnabled = true
+								node.Detected = "security.authorization = enabled"
+							}
+						}
+						if kf, ok := sec["keyFile"].(string); ok && kf != "" {
+							node.KeyFile = true
+							if !node.AuthEnabled {
+								node.AuthEnabled = true
+								node.Detected = "security.keyFile set (internal auth)"
+							}
+						}
+						if cam, ok := sec["clusterAuthMode"].(string); ok {
+							node.ClusterAuthMode = cam
+						}
+					}
+					// TLS / SSL mode (bonus security context)
+					if net := toMap(parsed["net"]); net != nil {
+						if tls := toMap(net["tls"]); tls != nil {
+							if m, ok := tls["mode"].(string); ok {
+								node.TLSMode = m
+							}
+						}
+						if node.TLSMode == "" {
+							if ssl := toMap(net["ssl"]); ssl != nil {
+								if m, ok := ssl["mode"].(string); ok {
+									node.TLSMode = m
+								}
+							}
+						}
+					}
+				}
+				if !node.AuthEnabled && hasAuthFlag {
+					node.AuthEnabled = true
+					node.Detected = "--auth command-line flag"
+				}
+				if !node.AuthEnabled && node.Detected == "" {
+					node.Detected = "no access control configured"
+				}
+			}
+
+			// ── Mechanism usage + version via serverStatus ──
+			if ss, err2 := runCmd(finalURI, "admin", bson.D{{Key: "serverStatus", Value: 1}}); err2 == nil {
+				if v, ok := ss["version"].(string); ok {
+					node.Version = v
+				}
+				if sec := toMap(ss["security"]); sec != nil {
+					if auth := toMap(sec["authentication"]); auth != nil {
+						if mechs := toMap(auth["mechanisms"]); mechs != nil {
+							names := make([]string, 0, len(mechs))
+							for name := range mechs {
+								names = append(names, name)
+							}
+							sort.Strings(names)
+							for _, name := range names {
+								md := toMap(mechs[name])
+								if md == nil {
+									continue
+								}
+								ms := SecMechStat{Mechanism: name}
+								if a := toMap(md["authenticate"]); a != nil {
+									ms.AuthReceived = toInt64(a["received"])
+									ms.AuthSuccessful = toInt64(a["successful"])
+								}
+								if sp := toMap(md["speculativeAuthenticate"]); sp != nil {
+									ms.SpecReceived = toInt64(sp["received"])
+									ms.SpecSuccessful = toInt64(sp["successful"])
+								}
+								if cl := toMap(md["clusterAuthenticate"]); cl != nil {
+									ms.ClusterReceived = toInt64(cl["received"])
+									ms.ClusterSuccessful = toInt64(cl["successful"])
+								}
+								node.Mechanisms = append(node.Mechanisms, ms)
+							}
+						}
+					}
+				}
+			}
+
+			mu.Lock()
+			nodes = append(nodes, node)
+			mu.Unlock()
+		}(t)
+	}
+	wg.Wait()
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	jsonOK(w, map[string]interface{}{"nodes": nodes})
 }
 
 // ── WiredTiger Stats ──────────────────────────────────────────────────────────
@@ -3278,8 +4293,59 @@ func toInt64(v interface{}) int64 {
 		return int64(x)
 	case int64:
 		return x
+	case int:
+		return int64(x)
+	case uint32:
+		return int64(x)
+	case uint64:
+		return int64(x)
 	case float64:
 		return int64(x)
+	}
+	return 0
+}
+
+// tsSecondsFromAny extracts the seconds component (T) from the value that
+// bsonToAny() produces for a BSON Timestamp, i.e.
+//   {"$timestamp": {"t": <uint32>, "i": <uint32>}}
+// The inner map is created as map[string]uint32 by bsonToAny, so a plain
+// toMap() (which only matches map[string]interface{}) would miss it — which
+// is exactly why the oplog "Window" used to always read 0. This helper copes
+// with both shapes.
+func tsSecondsFromAny(v interface{}) int64 {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	inner, ok := m["$timestamp"]
+	if !ok {
+		return 0
+	}
+	switch t := inner.(type) {
+	case map[string]uint32:
+		return int64(t["t"])
+	case map[string]interface{}:
+		return toInt64(t["t"])
+	}
+	return 0
+}
+
+func toFloat64(v interface{}) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int32:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case int:
+		return float64(x)
+	case uint32:
+		return float64(x)
+	case uint64:
+		return float64(x)
 	}
 	return 0
 }
@@ -3442,6 +4508,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, map[string]interface{}{
 		"ViewOnly": viewOnly,
+		"Version":  version,
 	})
 }
 
@@ -3510,11 +4577,13 @@ func main() {
 	mux.HandleFunc("/api/db/indexes",              handleListIndexes)
 	mux.HandleFunc("/api/db/drop-index",           readOnlyGuard(handleDropIndex))
 	mux.HandleFunc("/api/db/oplog-stats",          handleOplogStats)
+	mux.HandleFunc("/api/db/oplog-analyze",        handleOplogAnalyze)
 	mux.HandleFunc("/api/db/profiler-level",       handleGetProfilingLevel)
 	mux.HandleFunc("/api/db/profiler-level-set",   readOnlyGuard(handleSetProfilingLevel))
 	mux.HandleFunc("/api/db/profiler-entries",     handleProfilerEntries)
 	mux.HandleFunc("/api/db/explain",              handleExplain)
 	mux.HandleFunc("/api/db/log",                  handleGetLog)
+	mux.HandleFunc("/api/db/security-status",      handleSecurityStatus)
 	mux.HandleFunc("/api/db/wiredtiger",           handleWiredTiger)
 	mux.HandleFunc("/api/user/roles",              handleGetRoles)
 	mux.HandleFunc("/api/user/role-detail",        handleGetRoleDetail)
@@ -3522,10 +4591,14 @@ func main() {
 	mux.HandleFunc("/api/user/delete-role",        readOnlyGuard(handleDeleteRole))
 	mux.HandleFunc("/api/user/create-role",        readOnlyGuard(handleCreateRole))
 	mux.HandleFunc("/api/user/users",              handleGetUsers)
+	mux.HandleFunc("/api/user/connection-status",  handleConnectionStatus)
 	mux.HandleFunc("/api/user/create-user",        readOnlyGuard(handleCreateUser))
 	mux.HandleFunc("/api/user/delete-user",        readOnlyGuard(handleDeleteUser))
 	mux.HandleFunc("/api/user/set-user-roles",     readOnlyGuard(handleSetUserRoles))
 	mux.HandleFunc("/api/user/update-user-roles",  readOnlyGuard(handleUpdateUserRoles))
+	mux.HandleFunc("/api/user/check-presence",     handleCheckPresence)
+	mux.HandleFunc("/api/user/sync-user",          readOnlyGuard(handleSyncUser))
+	mux.HandleFunc("/api/user/sync-role",          readOnlyGuard(handleSyncRole))
 
 	// Validate port
 	addr := ":" + *tcpPort

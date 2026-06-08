@@ -72,6 +72,8 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 .btn-active{border-color:#00ed64!important;color:#00ed64!important;}
 .btn-danger{border:1px solid #f85149;color:#f85149;font-size:.75rem;padding:4px 10px;border-radius:5px;background:transparent;cursor:pointer;transition:all .15s;}
 .btn-danger:hover{background:#3d0e0a;}
+.btn-go{border:1px solid #00ed64;color:#00ed64;font-size:.75rem;padding:4px 12px;border-radius:5px;background:rgba(0,237,100,.08);cursor:pointer;transition:all .15s;font-weight:600;}
+.btn-go:hover{background:rgba(0,237,100,.18);}
 .fi{background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-family:"JetBrains Mono",monospace;font-size:.8rem;padding:5px 10px;outline:none;}
 .fi:focus{border-color:#00ed64;}select.fi option{background:#161b22;}
 .db-bar-wrap{background:#21262d;border-radius:3px;height:8px;overflow:hidden;flex:1;}
@@ -143,6 +145,10 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
     <button onclick="nav('slowQueries')"  id="nav-slowQueries"  class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🐢 Slow Queries</button>
     <button onclick="nav('logViewer')"    id="nav-logViewer"    class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">📜 Log Viewer</button>
     <button onclick="nav('usersRoles')"   id="nav-usersRoles"   class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">👥 Users & Roles</button>
+    <button onclick="nav('securityStatus')" id="nav-securityStatus" class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🔐 Security Status</button>
+  </div>
+  <div class="mt-auto px-3 py-2 text-[10px] text-gray-700 tracking-wide flex items-center justify-between border-t border-panel-border">
+    <span>🍃 MongoAdmin</span><span class="mono">v{{.Version}}</span>
   </div>
 </aside>
 
@@ -224,6 +230,15 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
     <div class="p-5 space-y-4 overflow-y-auto flex-1">
       <input type="hidden" id="createRoleDb">
       <input type="hidden" id="createRoleIsEdit">
+      <input type="hidden" id="createRoleTargetUri">
+      <!-- Modify on — edit mode only; populated by _loadModifyOnCheckboxes -->
+      <div id="createRoleModifyOnBlock" class="hidden">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Modify on</label>
+        <div id="createRoleModifyList" class="space-y-1 bg-panel-inner border border-panel-border rounded p-3">
+          <div class="text-gray-500 text-xs flex gap-2 items-center"><span class="spinner"></span>Checking presence…</div>
+        </div>
+        <div class="text-xs text-gray-600 mt-1">Only targets where this role exists are enabled. Use 🔄 Sync to copy to missing targets first.</div>
+      </div>
       <div>
         <label class="text-xs text-gray-500 font-semibold block mb-1">Role Name</label>
         <input id="createRoleName" class="fi w-full" placeholder="my_custom_role">
@@ -252,6 +267,17 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
         <div id="privilegesList" class="space-y-2"></div>
         <div id="privilegesEmpty" class="text-gray-600 text-xs mt-1">No direct privileges</div>
       </div>
+
+      <!-- Create on — create mode only; mongos first (checked), shards below (unchecked) -->
+      <div id="createRoleTargetsBlock" class="hidden">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Create on</label>
+        <div id="createRoleTargetsList" class="space-y-1 bg-panel-inner border border-panel-border rounded p-3"></div>
+      </div>
+      <!-- Per-target creation results -->
+      <div id="createRoleResultsWrap" class="hidden">
+        <div class="text-xs text-gray-500 font-semibold mb-1">Results</div>
+        <div id="createRoleResults" class="bg-panel-inner border border-panel-border rounded p-3 text-xs space-y-1"></div>
+      </div>
     </div>
     <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
       <button onclick="closeCreateRoleModal()" class="btn-sm">Cancel</button>
@@ -270,6 +296,15 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
     <div class="p-5 space-y-4 overflow-y-auto flex-1">
       <input type="hidden" id="createUserDb">
       <input type="hidden" id="createUserIsEdit">
+      <input type="hidden" id="createUserTargetUri">
+      <!-- Modify on — edit mode; populated by _loadModifyOnCheckboxes -->
+      <div id="createUserModifyOnBlock" class="hidden">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Modify on</label>
+        <div id="createUserModifyList" class="space-y-1 bg-panel-inner border border-panel-border rounded p-3">
+          <div class="text-gray-500 text-xs flex gap-2 items-center"><span class="spinner"></span>Checking presence…</div>
+        </div>
+        <div class="text-xs text-gray-600 mt-1">Only targets where this user exists are enabled. Use 🔄 Sync to copy to missing targets first.</div>
+      </div>
       <div>
         <label class="text-xs text-gray-500 font-semibold block mb-1">Username</label>
         <input id="createUsername" class="fi w-full" placeholder="newuser">
@@ -290,6 +325,17 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
         <div id="userRolesList" class="flex flex-wrap gap-1 min-h-[28px] bg-panel-inner border border-panel-border rounded p-2">
           <span class="text-gray-600 text-xs" id="userRolesEmpty">No roles assigned</span>
         </div>
+      </div>
+
+      <!-- Create on — create mode; mongos first (checked), shards below (unchecked) -->
+      <div id="createUserTargetsBlock" class="hidden">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Create on</label>
+        <div id="createUserTargetsList" class="space-y-1 bg-panel-inner border border-panel-border rounded p-3"></div>
+      </div>
+      <!-- Per-target creation results -->
+      <div id="createUserResultsWrap" class="hidden">
+        <div class="text-xs text-gray-500 font-semibold mb-1">Results</div>
+        <div id="createUserResults" class="bg-panel-inner border border-panel-border rounded p-3 text-xs space-y-1"></div>
       </div>
     </div>
     <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
@@ -346,6 +392,90 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
   </div>
 </div>
 
+<!-- SYNC USER/ROLE TO OTHER SHARDS MODAL -->
+<div id="syncModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[640px] max-w-[95vw] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0">
+      <span id="syncModalTitle">🔄 Sync to other shards</span>
+      <button onclick="closeSyncModal()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4 overflow-y-auto flex-1">
+      <div class="text-xs text-gray-500 leading-relaxed" id="syncModalIntro"></div>
+      <div id="syncShardList" class="space-y-1 bg-panel-inner border border-panel-border rounded p-3 text-sm">
+        <div class="text-gray-500 text-xs flex items-center gap-2"><span class="spinner"></span>Checking presence on each shard…</div>
+      </div>
+      <div id="syncModeBlock" class="hidden">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Sync mode</label>
+        <div class="flex flex-col gap-1.5 bg-panel-inner border border-panel-border rounded p-3">
+          <label class="flex items-start gap-2 cursor-pointer text-sm">
+            <input type="radio" name="syncMode" value="plaintext" checked onchange="syncModeChanged()" class="mt-0.5">
+            <span><span class="text-gray-200">Set new password</span> <span class="text-gray-600 text-xs">— calls <code class="mono">createUser</code> on each target with the plaintext password you supply below. Each shard generates its own SCRAM salt; users authenticate the same plaintext but the stored hashes differ across shards.</span></span>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer text-sm">
+            <input type="radio" name="syncMode" value="clone" onchange="syncModeChanged()" class="mt-0.5">
+            <span><span class="text-gray-200">Clone exact credentials</span> <span class="mb b-ARBITER text-xs ml-1">advanced</span> <span class="text-gray-600 text-xs">— reads the source user's SCRAM credentials (salt + storedKey + serverKey) and pushes them verbatim via the internal <code class="mono">_mergeAuthzCollections</code> command. No password input needed.</span></span>
+          </label>
+        </div>
+        <div id="syncCloneWarn" class="hidden mt-2 bg-yellow-900/20 border border-yellow-800/60 rounded p-3 text-xs leading-relaxed">
+          <div class="font-semibold text-yellow-300 mb-1">⚠️ Clone mode is the mongorestore back-door</div>
+          <ul class="text-yellow-200/80 list-disc list-inside space-y-1">
+            <li><code class="mono">_mergeAuthzCollections</code> is an internal command. <code class="mono">userAdminAnyDatabase</code> is <em>not</em> enough — your session needs the built-in <code class="mono">restore</code> role (or <code class="mono">__system</code>) on each target's admin database.</li>
+            <li>The source must let you read credentials (<code class="mono">showCredentials: true</code> works under <code class="mono">userAdmin</code>'s <code class="mono">viewUser</code> action).</li>
+            <li>This bypasses <code class="mono">createUser</code>'s validation pipeline — including any password-policy modules in MongoDB Enterprise / Percona PSMP.</li>
+            <li>SCRAM mechanism mismatch (e.g. source has SCRAM-SHA-1-only, target rejects SHA-1) will produce a user that cannot authenticate. Verify <code class="mono">authenticationMechanisms</code> is consistent across shards.</li>
+            <li>The currently common K8s operator pattern (MongoDB Community Operator, Percona PSMDB Operator) does <em>not</em> use this path — they store the plaintext in a Secret and call <code class="mono">createUser</code> like plaintext mode here. Prefer plaintext mode unless you specifically need byte-identical credentials.</li>
+          </ul>
+        </div>
+      </div>
+      <!-- Update if exists option (visible only for users in plaintext mode) -->
+      <div id="syncUpdateBlock" class="hidden">
+        <label class="flex items-start gap-2 cursor-pointer text-sm bg-panel-inner border border-panel-border rounded p-3">
+          <input type="checkbox" id="syncUpdateIfExists" onchange="syncToggleUpdate()" class="mt-0.5">
+          <span><span class="text-gray-200">Update roles even if user already exists</span> <span class="text-gray-600 text-xs">— when the user is found on the target, run <code class="mono">updateUser</code> to overwrite its role list (and password if provided) to match the source. Useful when the same user has drifted to different roles across shards.</span></span>
+        </label>
+      </div>
+      <div id="syncPasswordBlock" class="hidden">
+        <label class="text-xs text-gray-500 font-semibold block mb-1">Password for new user creation</label>
+        <input id="syncPassword" type="password" class="fi w-full" placeholder="••••••••">
+        <div class="text-xs text-gray-600 mt-1 leading-relaxed">
+          MongoDB never exposes the source user's password hash, so you need to supply one. The created users on each target shard will get this password — the existing source account is unchanged.
+        </div>
+      </div>
+      <div id="syncResultsWrap" class="hidden">
+        <div class="text-xs text-gray-500 font-semibold mb-1">Results</div>
+        <div id="syncResults" class="bg-panel-inner border border-panel-border rounded p-3 text-xs space-y-1"></div>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
+      <button onclick="closeSyncModal()" class="btn-sm">Close</button>
+      <button onclick="executeSyncOp()" id="syncConfirmBtn" class="bg-mg text-black font-bold text-sm px-4 py-1.5 rounded hover:bg-mg-dark">Sync</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE FROM SHARDS MODAL (shard-section only) -->
+<div id="deleteShardModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[520px] max-w-[95vw] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0">
+      <span id="deleteShardTitle">🗑 Delete from shards</span>
+      <button onclick="closeDeleteShardModal()" class="ml-auto text-gray-500 hover:text-gray-200">✕</button>
+    </div>
+    <div class="p-5 space-y-4 overflow-y-auto flex-1">
+      <div class="text-xs text-gray-400 leading-relaxed" id="deleteShardIntro"></div>
+      <div id="deleteShardShardList" class="space-y-1 bg-panel-inner border border-panel-border rounded p-3"></div>
+      <div id="deleteShardResultsWrap" class="hidden">
+        <div class="text-xs text-gray-500 font-semibold mb-1">Results</div>
+        <div id="deleteShardResults" class="bg-panel-inner border border-panel-border rounded p-3 text-xs space-y-1"></div>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end px-5 py-4 border-t border-panel-border shrink-0">
+      <button onclick="closeDeleteShardModal()" class="btn-sm">Cancel</button>
+      <button onclick="executeDeleteFromShards()" id="deleteShardConfirmBtn"
+        class="bg-red-700 hover:bg-red-600 text-white font-bold text-sm px-4 py-1.5 rounded">Delete</button>
+    </div>
+  </div>
+</div>
+
 <!-- EXPLAIN MODAL -->
 <div id="explainModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
   <div class="bg-panel border border-panel-border rounded-xl w-[900px] max-w-[95vw] max-h-[90vh] flex flex-col shadow-2xl">
@@ -371,9 +501,72 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
         <pre id="explainCommand" class="text-xs mono text-gray-300 bg-panel-inner p-4 overflow-auto max-h-40 whitespace-pre-wrap"></pre>
       </div>
       <div class="card">
-        <div class="card-header">🌳 Explain Output</div>
-        <div class="p-4 max-h-[420px] overflow-y-auto mono text-xs leading-6" id="explainTree"></div>
+        <div class="card-header flex-wrap">
+          <span>🔍 Explain Output</span>
+          <div class="flex border border-panel-border rounded ml-2 overflow-hidden">
+            <button id="exTabViz"  onclick="setExplainView('viz')"  class="px-3 py-1 text-xs">📊 Visualization</button>
+            <button id="exTabTree" onclick="setExplainView('tree')" class="px-3 py-1 text-xs border-l border-panel-border">🌳 JSON Tree</button>
+          </div>
+          <div class="ml-auto flex gap-2" id="exTreeControls">
+            <button onclick="jtExpandAll('explainTree')"   class="btn-xs">Expand All</button>
+            <button onclick="jtCollapseAll('explainTree')" class="btn-xs">Collapse All</button>
+          </div>
+        </div>
+        <div id="explainVizWrap" class="p-4 max-h-[600px] overflow-y-auto">
+          <div id="explainViz"></div>
+        </div>
+        <div id="explainTreeWrap" class="p-4 max-h-[480px] overflow-y-auto mono text-xs leading-6 hidden">
+          <div id="explainTree"></div>
+        </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="oplogAnalyzeModal" class="modal-wrap fixed inset-0 bg-black/60 z-50 items-center justify-center">
+  <div class="bg-panel border border-panel-border rounded-xl w-[860px] max-w-[95vw] max-h-[90vh] flex flex-col shadow-2xl">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-panel-border font-bold shrink-0 flex-wrap">
+      <span>🔬 Oplog Write Analysis</span>
+      <code class="text-gray-500 text-xs mono" id="oaSetName"></code>
+      <button onclick="closeOplogAnalyze()" class="ml-auto text-gray-500 hover:text-gray-200 text-lg leading-none px-1">✕</button>
+    </div>
+    <div class="p-5 overflow-y-auto flex-1">
+      <!-- Warning / parameters state -->
+      <div id="oaWarn">
+        <div class="rounded-lg p-4 text-sm leading-relaxed" style="background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.4);color:#e3b341">
+          <div class="font-bold mb-2">⚠️ This query can be expensive on production</div>
+          It scans the recent oplog and computes the BSON size of <em>every</em> write entry in the
+          selected window, grouped by collection. On a busy primary this adds CPU and memory load and
+          can take a while. Start with a short window and widen only if you need to.
+          <div class="text-xs text-gray-500 mt-2">Requires <span class="mono">$bsonSize</span> (MongoDB 4.4+). Runs against the member you opened it from.</div>
+        </div>
+        <div class="flex items-center gap-3 mt-4 flex-wrap">
+          <span class="text-xs text-gray-500">Look back:</span>
+          <select id="oaMinutes" class="fi text-xs">
+            <option value="5">5 minutes</option>
+            <option value="10" selected>10 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+          <span class="text-xs text-gray-500 ml-3">Top</span>
+          <select id="oaLimit" class="fi text-xs">
+            <option value="10">10</option>
+            <option value="15" selected>15</option>
+            <option value="25">25</option>
+          </select>
+          <span class="text-xs text-gray-500">collections by write volume</span>
+        </div>
+        <div class="flex justify-end gap-2 mt-5">
+          <button onclick="closeOplogAnalyze()" class="btn-sm">Cancel</button>
+          <button onclick="runOplogAnalyze()" class="btn-go">▶ Run analysis</button>
+        </div>
+      </div>
+      <!-- Loading state -->
+      <div id="oaLoading" class="hidden items-center gap-3 text-gray-500 py-12 justify-center">
+        <div class="spinner"></div> Scanning oplog…
+      </div>
+      <!-- Results state -->
+      <div id="oaResults" class="hidden"></div>
     </div>
   </div>
 </div>
@@ -383,6 +576,7 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 <script>
 // ── View-only mode: injected by the Go template at serve time ─────────────
 const VIEW_ONLY = {{if .ViewOnly}}true{{else}}false{{end}};
+const APP_VERSION = "{{.Version}}";
 
 // ═══════════════════════════════════════════════════════════ STATE
 let uri='', topology={type:'replicaset',nodes:[]}, currentPage='';
@@ -445,7 +639,7 @@ async function doConnect() {
   setStatus('CONNECTING…','yellow');
   const res=await api('/api/ping',{uri:input});
   if(res.error){setStatus('ERROR','red');return toast(res.error,'error');}
-  uri=input; opTargetURI=uri; ssTargetURI=uri; rsCfgTargetURI=''; memberNodes=[];
+  uri=input; opTargetURI=uri; ssTargetURI=uri; rsCfgTargetURI=''; usersRolesURI=''; memberNodes=[];
   document.getElementById('disconnectBtn').classList.remove('hidden');
   
   // Display masked URI and clear input for security
@@ -504,7 +698,7 @@ function setStatus(label,color){
 }
 
 // ═══════════════════════════════════════════════════════════ NAV
-const pages={rsStatus,rsConfig,members,shStatus,serverStatus,wiredTiger,oplogStats,dbStats,collStats,indexMgmt,currentOp,trafficMonitor,slowQueries,logViewer,usersRoles};
+const pages={rsStatus,rsConfig,members,shStatus,serverStatus,wiredTiger,oplogStats,dbStats,collStats,indexMgmt,currentOp,trafficMonitor,slowQueries,logViewer,usersRoles,securityStatus};
 async function nav(page){
   if(!uri) return toast('Connect first','error');
   // Pause live traffic monitor polling when leaving that page
@@ -529,8 +723,17 @@ function setMain(h){
 
 // ═══════════════════════════════════════════════════════════ API
 async function api(path,params={}){
-  // Add shard credentials to request if available
-  const body = new URLSearchParams(params);
+  // Build the body manually so array-valued params (like targetUri:[...] for
+  // sync calls) get serialized as repeated keys instead of comma-joined into
+  // one string — RS URIs contain commas inside themselves.
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) {
+      v.forEach(x => body.append(k, x));
+    } else if (v !== undefined && v !== null) {
+      body.append(k, v);
+    }
+  }
   
   if (Object.keys(shardCredentials).length > 0) {
     debugLog(`[api] Sending shard credentials: ${JSON.stringify(Object.keys(shardCredentials))}`);
@@ -664,6 +867,41 @@ function instanceSelect(currentURI,onchangeFn){
   if(opts.length<=1) return '';
   return `<div class="flex items-center gap-2">
     <span class="text-xs text-gray-500">Instance:</span>
+    <select onchange="${onchangeFn}(this.value)" class="fi text-xs">
+      ${opts.map(o=>`<option value="${esc(o.uri)}" ${o.uri===currentURI?'selected':''}>${esc(o.label)}</option>`).join('')}
+    </select></div>`;
+}
+
+// Profiler-specific instance selector. The system.profile collection lives
+// only on individual mongod members — mongos has no profiler and cannot read
+// system.profile from shards on the user's behalf. So this variant excludes
+// every mongos option (both the connected-seed pseudo-entry and any
+// discovered mongos members) and only offers data-bearing mongods.
+function buildMongodInstanceOptions(){
+  const opts=[];
+  for(const m of memberNodes){
+    if(m.role==='arbiter') continue; // arbiters carry no data, no profile
+    const mUri = injectCredsIntoUri(m.uri);
+    const label = `${m.rs}/${m.id.split('/')[1]||m.id} (${m.role})`;
+    opts.push({uri: mUri, label});
+  }
+  // Plain RS with no per-member breakdown discovered yet — fall back to seed
+  if(topology.type!=='sharded' && memberNodes.length===0){
+    opts.push({uri, label:'connected RS'});
+  }
+  const seen=new Set();
+  return opts.filter(o=>{if(seen.has(o.uri))return false;seen.add(o.uri);return true;});
+}
+function mongodInstanceSelect(currentURI,onchangeFn){
+  const opts=buildMongodInstanceOptions();
+  if(opts.length===0){
+    return `<span class="text-xs text-gray-500">No mongod members discovered — connect with a working URI</span>`;
+  }
+  if(opts.length===1){
+    return `<span class="text-xs text-gray-500">Mongod: <span class="mono text-gray-300">${esc(opts[0].label)}</span></span>`;
+  }
+  return `<div class="flex items-center gap-2">
+    <span class="text-xs text-gray-500">Mongod:</span>
     <select onchange="${onchangeFn}(this.value)" class="fi text-xs">
       ${opts.map(o=>`<option value="${esc(o.uri)}" ${o.uri===currentURI?'selected':''}>${esc(o.label)}</option>`).join('')}
     </select></div>`;
@@ -1937,56 +2175,198 @@ function _matchesBatchFilter(op, p) {
 
 // ═══════════════════════════════════════════════════════════ USERS & ROLES
 
+// Renders the "Your Session" card from a connectionStatus response. Shows
+// the authenticated identities (typically one, but mongos can surface more
+// if impersonation is in play) and the fully-resolved set of effective
+// roles, so the DBA can verify what their next click is actually allowed
+// to do *as the session sees it*. Falls back to a muted "couldn't read"
+// state if the server refused (e.g. no auth at all, or the connection
+// dropped between fetches).
+function renderSessionCard(connStatus) {
+  if (!connStatus || connStatus.error) {
+    return `<div class="card">
+      <div class="card-header">🛡️ Your Session
+        <span class="text-gray-600 font-normal text-xs ml-2">connectionStatus</span>
+      </div>
+      <div class="p-4 text-xs text-gray-500">
+        ${connStatus && connStatus.error
+          ? `Couldn't read connection status: <code class="mono text-red-300">${esc(connStatus.error)}</code>`
+          : 'No connection status available.'}
+      </div>
+    </div>`;
+  }
+  const info  = connStatus.authInfo || {};
+  const users = Array.isArray(info.authenticatedUsers)     ? info.authenticatedUsers     : [];
+  const roles = Array.isArray(info.authenticatedUserRoles) ? info.authenticatedUserRoles : [];
+
+  const userPills = users.length
+    ? users.map(u => `<span class="mb b-PRIMARY mono text-xs">${esc(u.user)}@${esc(u.db)}</span>`).join(' ')
+    : '<span class="text-gray-600 text-xs">— anonymous / no authentication —</span>';
+
+  // Sort: built-in roles last (they're noisy and well-known), custom first.
+  const builtinSet = new Set([
+    'read','readWrite','dbAdmin','dbOwner','userAdmin',
+    'clusterMonitor','clusterManager','clusterAdmin','hostManager',
+    'readAnyDatabase','readWriteAnyDatabase','dbAdminAnyDatabase','userAdminAnyDatabase',
+    'backup','restore','root','__system','enableSharding',
+  ]);
+  const sortedRoles = [...roles].sort((a,b) => {
+    const ab = builtinSet.has(a.role) ? 1 : 0;
+    const bb = builtinSet.has(b.role) ? 1 : 0;
+    if (ab !== bb) return ab - bb;
+    return (a.role||'').localeCompare(b.role||'');
+  });
+  const rolePills = sortedRoles.length
+    ? sortedRoles.map(r => {
+        const cls = builtinSet.has(r.role) ? 'b-SECONDARY' : 'b-PRIMARY';
+        return `<span class="mb ${cls} mono text-xs">${esc(r.role)}<span class="text-gray-500"> @ ${esc(r.db)}</span></span>`;
+      }).join(' ')
+    : '<span class="text-gray-600 text-xs">— no roles —</span>';
+
+  return `<div class="card">
+    <div class="card-header">🛡️ Your Session
+      <span class="text-gray-600 font-normal text-xs ml-2">db.runCommand({connectionStatus: 1})</span>
+    </div>
+    <div class="p-4 space-y-3">
+      <div>
+        <div class="text-xs text-gray-500 font-semibold uppercase mb-1.5">Authenticated as</div>
+        <div class="flex flex-wrap gap-1.5">${userPills}</div>
+      </div>
+      <div>
+        <div class="text-xs text-gray-500 font-semibold uppercase mb-1.5">Effective roles
+          <span class="text-gray-600 font-normal normal-case ml-1">(${sortedRoles.length})</span>
+        </div>
+        <div class="flex flex-wrap gap-1.5">${rolePills}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 // Build a replica-set selector (one entry per RS, uses primaryPreferred)
 function rsSelect(currentURI, onchangeFn) {
   const rsList = rsNodesList();
   if (rsList.length === 0) return ''; // plain RS — no selector needed
-  // In sharded clusters expose mongos as the first ("cluster-wide") option so
-  // the user can switch back to it after selecting a specific shard. All
-  // shard-direct connections fail listDatabases / usersInfo with the
-  // "improperly connected to a sharded cluster" error, so mongos is the
-  // sensible default for users/roles management.
-  const isSharded = topology.type === 'sharded';
-  const mongosOpt = isSharded
-    ? `<option value="${esc(uri)}" ${uri===currentURI?'selected':''}>mongos (cluster-wide)</option>`
-    : '';
+  // Mongos is intentionally NOT listed here. In a sharded cluster mongos has
+  // no local storage of its own — running usersInfo / rolesInfo / etc.
+  // against it just federates to the config server, so picking "mongos" and
+  // picking the configsvr entry produce identical results. Showing both
+  // would be a UX trap. The configsvr entry (which is in rsList) is the
+  // direct, equivalent target for cluster-wide users and roles.
   return `<div class="flex items-center gap-2">
     <span class="text-xs text-gray-500">Target:</span>
     <select onchange="${onchangeFn}(this.value)" class="fi text-xs">
-      ${mongosOpt}
       ${rsList.map(n => {
         const base = injectCredsIntoUri(n.uri);
         const sep = base.includes('?') ? '&' : '?';
         const ppUri = base + sep + 'readPreference=primaryPreferred';
-        return `<option value="${esc(ppUri)}" ${ppUri===currentURI||base===currentURI?'selected':''}>${esc(n.id)} (${esc(n.role)})</option>`;
+        const label = n.role === 'configsvr'
+          ? `${esc(n.id)} (configsvr — cluster-wide)`
+          : `${esc(n.id)} (${esc(n.role)})`;
+        return `<option value="${esc(ppUri)}" ${ppUri===currentURI||base===currentURI?'selected':''}>${label}</option>`;
       }).join('')}
     </select>
   </div>`;
 }
 
+// Renders the cluster-wide card (top, full-width). All reads and writes go
+// through the connected mongos URI so auth changes propagate to the config
+// server and are picked up by every mongos instance in the cluster. Selecting
+// the configsvr directly would bypass mongos's auth-cache invalidation and
+// could cause new credentials to appear stale to apps hitting other mongos.
+function renderMongosCard(users, roles, usersErr, rolesErr, db, showBuiltin, mongosUri) {
+  const canWrite = !VIEW_ONLY;
+  const customRoles = (roles||[]).filter(r=>!r.isBuiltin);
+  const visible     = showBuiltin ? (roles||[]) : customRoles;
+
+  let rolesHtml = rolesErr
+    ? `<div class="text-xs text-red-300 p-2">${esc(rolesErr)}</div>`
+    : visible.length === 0
+      ? `<div class="text-xs text-gray-600 p-2">No ${showBuiltin?'':'custom '}roles</div>`
+      : `<table class="dt text-xs w-full">
+          <thead><tr><th>Role</th><th>DB</th><th>Inherited</th><th></th></tr></thead>
+          <tbody>${visible.map(r => {
+            const inh = (r.inheritedRoles||[]).map(x=>esc(typeof x==='string'?x:x.role)).join(', ')||'—';
+            const acts = r.isBuiltin ? '<span class="text-gray-700 text-xs">built-in</span>' : [
+              canWrite ? `<button onclick="event.stopPropagation();openEditRoleModalFrom('${esc(r.name)}','${esc(db)}','${esc(mongosUri)}')" class="btn-xs">✏️</button>` : '',
+              canWrite ? `<button onclick="event.stopPropagation();deleteFromMongos('role','${esc(r.name)}','${esc(db)}','${esc(mongosUri)}')" class="btn-xs">🗑</button>` : '',
+            ].filter(Boolean).join(' ');
+            return `<tr>
+              <td class="mono font-semibold ${r.isBuiltin?'text-gray-500':'text-mg'}">${esc(r.name)}</td>
+              <td class="mono text-xs text-gray-500">${esc(r.db||db)}</td>
+              <td class="text-xs text-gray-500 truncate max-w-[220px]">${inh}</td>
+              <td class="text-right">${acts}</td></tr>`;
+          }).join('')}</tbody></table>`;
+
+  let usersHtml = usersErr
+    ? `<div class="text-xs text-red-300 p-2">${esc(usersErr)}</div>`
+    : !(users||[]).length
+      ? `<div class="text-xs text-gray-600 p-2">No users in <span class="mono">${esc(db)}</span></div>`
+      : `<table class="dt text-xs w-full">
+          <thead><tr><th>User</th><th>Auth DB</th><th>Roles</th><th></th></tr></thead>
+          <tbody>${users.map(u => {
+            const chips = (u.roles||[]).map(r=>`<span class="mb b-ok" style="font-size:.6rem">${esc(typeof r==='string'?r:r.role)}</span>`).join(' ')||'<span class="text-gray-600">—</span>';
+            const acts  = [
+              canWrite ? `<button onclick="editUserRolesFrom('${esc(u.username)}','${esc(u.database||db)}','${esc(mongosUri)}')" class="btn-xs">✏️ Roles</button>` : '',
+              canWrite ? `<button onclick="deleteFromMongos('user','${esc(u.username)}','${esc(u.database||db)}','${esc(mongosUri)}')" class="btn-xs">🗑</button>` : '',
+            ].filter(Boolean).join(' ');
+            return `<tr>
+              <td class="mono font-semibold">${esc(u.username)}</td>
+              <td class="mono text-xs text-gray-500">${esc(u.database||db)}</td>
+              <td class="text-xs">${chips}</td>
+              <td class="text-right whitespace-nowrap">${acts}</td></tr>`;
+          }).join('')}</tbody></table>`;
+
+  return `<div class="card">
+    <div class="card-header">
+      🌐 Cluster-wide Users & Roles
+      <span class="mb b-mongos text-xs ml-2">via mongos</span>
+      <div class="ml-auto flex gap-2">
+
+      </div>
+    </div>
+    <div class="px-4 pt-2 pb-1 text-xs text-gray-600">
+      General application access — users created here are available through <em>any</em> mongos and do not require a direct shard connection.
+    </div>
+    <div class="p-3 border-b border-panel-border">
+      <div class="flex items-center gap-2 mb-2 text-xs">
+        <span class="font-semibold text-gray-400 uppercase">Roles</span>
+        <span class="text-gray-600">${customRoles.length} custom</span>
+      </div>
+      ${rolesHtml}
+    </div>
+    <div class="p-3">
+      <div class="text-xs font-semibold text-gray-400 uppercase mb-2">Users <span class="font-normal text-gray-600">${(users||[]).length}</span></div>
+      ${usersHtml}
+    </div>
+  </div>`;
+}
+
 async function usersRoles(targetURI) {
+  // usersRolesURI is used only for the session-status card.
   if (targetURI) usersRolesURI = targetURI;
   if (!usersRolesURI) {
-    // Default to the connected URI — in a sharded cluster this is mongos, which
-    // is the correct entry point for cluster-wide users/roles (the data lives
-    // on the config servers and mongos federates the auth commands).
-    // Connecting directly to a shard fails with "(Unauthorized) … improperly
-    // connecting to a sharded cluster" for listDatabases / usersInfo.
-    // In a plain RS the connected URI is the RS itself, which is also correct.
-    usersRolesURI = uri;
+    if (topology.type === 'sharded') {
+      const cfg = topology.nodes.find(n => n.role === 'configsvr');
+      if (cfg) {
+        const base = injectCredsIntoUri(cfg.uri);
+        usersRolesURI = base + (base.includes('?')?'&':'?') + 'readPreference=primaryPreferred';
+      } else { usersRolesURI = uri; }
+    } else { usersRolesURI = uri; }
   }
 
-  // Persist DB selection from DOM before any re-render
   const domDb = document.getElementById('urDbSelect')?.value;
   if (domDb) urSelectedDb = domDb;
 
-  const rsSel = rsSelect(usersRolesURI, 'setUsersRolesURI');
+  // Shard-only nodes (configsvr is represented by the cluster-wide card via mongos)
+  const shardNodes = rsNodesList().filter(n => n.role === 'shard');
 
-  // DB list always comes from mongos in a sharded cluster — shards refuse
-  // listDatabases when accessed directly. canonicalDataURI() returns mongos
-  // in sharded mode and the connected RS URI in plain RS mode.
-  const dbListURI = canonicalDataURI();
-  const dbsRes = await api('/api/db/stats', {uri: dbListURI});
+  // Fetch: DB list, session, cluster-wide users/roles via mongos, then per-shard
+  const mongosUri  = uri; // always use the connected mongos for cluster-wide reads+writes
+  const [dbsRes, connStatus] = await Promise.all([
+    api('/api/db/stats',               {uri: canonicalDataURI()}),
+    api('/api/user/connection-status', {uri: mongosUri}),
+  ]);
+
   if (!Array.isArray(dbsRes))
     return setMain(errBox((dbsRes && dbsRes.error) || 'Failed to load databases'));
 
@@ -1994,132 +2374,271 @@ async function usersRoles(targetURI) {
     `<option value="${esc(d.name)}" ${d.name===urSelectedDb?'selected':''}>${esc(d.name)}</option>`
   ).join('');
 
-  const dbSel = `<div class="flex items-center gap-2">
-    <span class="text-xs text-gray-500">Database:</span>
-    <select id="urDbSelect" onchange="urSelectedDb=this.value;usersRoles()" class="fi text-xs">
-      <option value="">Select database…</option>${dbOptions}
-    </select>
-  </div>`;
-
   const headerActions = `<div class="flex gap-2 flex-wrap items-center">
-    ${rsSel}${dbSel}
+    <div class="flex items-center gap-2"><span class="text-xs text-gray-500">DB:</span>
+      <select id="urDbSelect" onchange="urSelectedDb=this.value;usersRoles()" class="fi text-xs">
+        <option value="">Select database…</option>${dbOptions}
+      </select></div>
+    <button onclick="urShowBuiltin=!urShowBuiltin;usersRoles()"
+      class="btn-sm ${urShowBuiltin?'btn-active':''}">
+      ${urShowBuiltin?'👁 Hide built-in':'👁 Show built-in'}
+    </button>
+    ${VIEW_ONLY?'':`<button onclick="openCreateRoleModal('${esc(urSelectedDb)}','${esc(mongosUri)}')" class="btn-sm">➕ Role</button>`}
+    ${VIEW_ONLY?'':`<button onclick="openCreateUserModal('${esc(urSelectedDb)}','${esc(mongosUri)}')" class="btn-sm">➕ User</button>`}
     <button onclick="usersRoles()" class="btn-sm">↻</button>
   </div>`;
 
   if (!urSelectedDb) {
     setMain(`<div class="space-y-5">
-      ${pageHeader('👥','Users & Roles','Select replica set and database', headerActions)}
-      <div class="text-gray-500 text-sm">Select a database to view and manage users and roles.</div>
+      ${pageHeader('👥','Users & Roles','Select a database',headerActions)}
+      ${renderSessionCard(connStatus)}
+      <div class="text-gray-500 text-sm">Select a database to view users and roles.</div>
     </div>`);
     return;
   }
 
   setLoading();
 
-  try {
-    const [rolesRes, usersRes] = await Promise.all([
-      api('/api/user/roles', {uri: usersRolesURI, db: urSelectedDb}),
-      api('/api/user/users', {uri: usersRolesURI, db: urSelectedDb}),
-    ]);
+  // Fetch cluster-wide (via mongos) + all shard-local data in parallel
+  const [[mongosRolesRes, mongosUsersRes], shardData] = await Promise.all([
+    Promise.all([
+      api('/api/user/roles', {uri: mongosUri, db: urSelectedDb}),
+      api('/api/user/users', {uri: mongosUri, db: urSelectedDb}),
+    ]),
+    Promise.all(shardNodes.map(async node => {
+      const base     = injectCredsIntoUri(node.uri);
+      const shardUri = base + (base.includes('?')?'&':'?') + 'readPreference=primaryPreferred';
+      const [rr, ur] = await Promise.all([
+        api('/api/user/roles', {uri: shardUri, db: urSelectedDb}),
+        api('/api/user/users', {uri: shardUri, db: urSelectedDb}),
+      ]);
+      return {node, uri: shardUri,
+        roles: Array.isArray(rr) ? rr : [], rolesError: !Array.isArray(rr) ? (rr?.error||'error') : null,
+        users: Array.isArray(ur) ? ur : [], usersError: !Array.isArray(ur) ? (ur?.error||'error') : null};
+    })),
+  ]);
 
-    if (!rolesRes || rolesRes.error) return setMain(errBox(rolesRes ? rolesRes.error : 'No response (roles)'));
-    if (!usersRes || usersRes.error) return setMain(errBox(usersRes ? usersRes.error : 'No response (users)'));
+  const mongosRoles = Array.isArray(mongosRolesRes) ? mongosRolesRes : [];
+  const mongosUsers = Array.isArray(mongosUsersRes) ? mongosUsersRes : [];
+  const mongosRolesErr = !Array.isArray(mongosRolesRes) ? mongosRolesRes?.error : null;
+  const mongosUsersErr = !Array.isArray(mongosUsersRes) ? mongosUsersRes?.error : null;
 
-    const allRoles    = Array.isArray(rolesRes) ? rolesRes : [];
-    const users       = Array.isArray(usersRes)  ? usersRes  : [];
-    const customRoles  = allRoles.filter(r => !r.isBuiltin);
-    const builtinRoles = allRoles.filter(r =>  r.isBuiltin);
-    const visibleRoles = urShowBuiltin ? allRoles : customRoles;
+  const shardSection = shardData.length > 0 ? `
+    <div class="flex items-center gap-4 my-2">
+      <hr class="flex-1 border-panel-border">
+      <span class="text-xs text-gray-600 whitespace-nowrap">Direct-shard users &amp; roles</span>
+      <hr class="flex-1 border-panel-border">
+    </div>
+    <div class="text-xs text-gray-600 mb-3">
+      These users and roles exist only on individual shards and are intended for <em>direct</em> connections —
+      monitoring agents, backup tools, and DBA access. Applications should use cluster-wide users above.
+    </div>
+    <div class="grid grid-cols-1 ${shardData.length>1?'xl:grid-cols-2':''} gap-4">
+      ${shardData.map(sd => renderUrShardCard(sd, urSelectedDb, urShowBuiltin)).join('')}
+    </div>` : '';
 
-    const roleRows = visibleRoles.map(r => {
-      const detailId = 'rd-' + r.name.replace(/\W/g,'_');
-      return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="toggleRoleDetail('${detailId}','${esc(r.name)}','${esc(urSelectedDb)}')">
-        <td class="mono font-semibold ${r.isBuiltin ? 'text-gray-400' : 'text-mg'}">${esc(r.name)}</td>
-        <td class="mono text-xs">${esc(r.db)}</td>
-        <td class="text-xs">${r.inheritedRoles && r.inheritedRoles.length
-          ? r.inheritedRoles.map(ir => `<span class="mb b-secondary" style="font-size:.6rem">${esc(typeof ir==='string'?ir:ir.role)}</span>`).join(' ')
-          : '<span class="text-gray-600">—</span>'}</td>
-        <td class="text-right">
-          ${r.isBuiltin ? '<span class="text-xs text-gray-600">built-in</span>' : `
-            ${VIEW_ONLY?'':`<button onclick="event.stopPropagation();openEditRoleModal('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️</button>
-            <button onclick="event.stopPropagation();deleteRole('${esc(r.name)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>`}
-          `}
-        </td>
-        <td class="text-gray-600 text-xs">▼</td>
-      </tr>
-      <tr id="${detailId}" class="op-detail"><td colspan="5" class="p-0 bg-panel-inner">
-        <div id="${detailId}-content" class="p-4 text-xs text-gray-500 mono">Loading…</div>
-      </td></tr>`;
-    }).join('');
+  setMain(`<div class="space-y-5">
+    ${pageHeader('👥','Users & Roles',
+      `${[...new Set(shardData.flatMap(s=>s.roles.filter(r=>!r.isBuiltin).map(r=>r.name)))].length + mongosRoles.filter(r=>!r.isBuiltin).length} custom roles · ${[...new Set(shardData.flatMap(s=>s.users.map(u=>u.username)))].length + mongosUsers.length} users`,
+      headerActions)}
+    ${renderSessionCard(connStatus)}
+    ${renderMongosCard(mongosUsers, mongosRoles, mongosUsersErr, mongosRolesErr, urSelectedDb, urShowBuiltin, mongosUri)}
+    ${shardSection}
+  </div>`);
+}
+function renderUrShardCard(sData, db, showBuiltin) {
+  const {node, uri: shardUri, roles, rolesError, users, usersError} = sData;
+  const isCfg    = node.role === 'configsvr';
+  const shardLabel = isCfg
+    ? `${esc(node.id)} <span class="text-gray-500 font-normal text-xs">(Cluster-wide via Mongos on config servers)</span>`
+    : `${esc(node.id)} <span class="text-gray-600 font-normal text-xs">(${esc(node.role)})</span>`;
 
-    const userRows = users.map(u => `<tr>
-      <td class="mono font-semibold">${esc(u.username)}</td>
-      <td class="mono text-xs">${esc(u.database)}</td>
-      <td class="text-xs">${u.roles && u.roles.length
-        ? u.roles.map(role => `<span class="mb b-ok" style="font-size:.6rem">${esc(role)}</span>`).join(' ')
-        : '<span class="text-gray-600">no roles</span>'}</td>
-      <td class="text-right">
-        <button onclick="editUserRoles('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs mr-1">✏️ Edit roles</button>
-        ${VIEW_ONLY?'':`<button onclick="deleteUser('${esc(u.username)}','${esc(urSelectedDb)}')" class="btn-xs">🗑</button>`}
-      </td>
-    </tr>`).join('');
+  const canWrite  = !VIEW_ONLY;
+  const canSync   = !VIEW_ONLY && rsNodesList().length > 1;
 
-    // Rebuild header actions with selected db reflected
-    const dbOptions2 = dbsRes.map(d =>
-      `<option value="${esc(d.name)}" ${d.name===urSelectedDb?'selected':''}>${esc(d.name)}</option>`
-    ).join('');
-    const headerActions2 = `<div class="flex gap-2 flex-wrap items-center">
-      ${rsSel}
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-gray-500">Database:</span>
-        <select id="urDbSelect" onchange="urSelectedDb=this.value;usersRoles()" class="fi text-xs">
-          <option value="">Select database…</option>${dbOptions2}
-        </select>
-      </div>
-      <button onclick="usersRoles()" class="btn-sm">↻</button>
-    </div>`;
-
-    setMain(`<div class="space-y-5">
-      ${pageHeader('👥','Users & Roles',
-        `${customRoles.length} custom roles · ${builtinRoles.length} built-in · ${users.length} users`,
-        headerActions2)}
-
-      <div class="card">
-        <div class="card-header">🔐 Roles
-          <span class="text-gray-600 font-normal text-xs ml-1">${visibleRoles.length} shown</span>
-          <div class="flex gap-2 ml-auto">
-            <button onclick="urShowBuiltin=!urShowBuiltin;usersRoles()"
-              class="btn-sm ${urShowBuiltin ? 'btn-active' : ''}">
-              ${urShowBuiltin ? '👁 Hide built-in' : '👁 Show built-in'}
-            </button>
-            ${VIEW_ONLY?'':`<button onclick="openCreateRoleModal('${esc(urSelectedDb)}')" class="btn-sm">➕ Create Role</button>`}
-          </div>
-        </div>
-        <div class="overflow-x-auto"><table class="dt">
-          <thead><tr><th>Name</th><th>Database</th><th>Inherited Roles</th><th></th><th></th></tr></thead>
-          <tbody>${roleRows || `<tr><td colspan="5" class="text-center text-gray-600 py-6">${
-            urShowBuiltin ? 'No roles defined'
-            : 'No custom roles — <a class="text-mg cursor-pointer" onclick="urShowBuiltin=true;usersRoles()">show built-in roles</a>'
-          }</td></tr>`}</tbody>
-        </table></div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">👤 Users
-          ${VIEW_ONLY?'':`<button onclick="openCreateUserModal('${esc(urSelectedDb)}')" class="btn-sm ml-auto">➕ Create User</button>`}
-        </div>
-        <div class="overflow-x-auto"><table class="dt">
-          <thead><tr><th>Username</th><th>Database</th><th>Roles</th><th></th></tr></thead>
-          <tbody>${userRows || '<tr><td colspan="4" class="text-center text-gray-600 py-6">No users</td></tr>'}</tbody>
-        </table></div>
-      </div>
-    </div>`);
-  } catch(e) {
-    setMain(errBox('Error: ' + e.message));
+  // ── Roles ─────────────────────────────────────────────────────────────────
+  let rolesHtml = '';
+  if (rolesError) {
+    rolesHtml = `<div class="text-xs text-red-300 p-2">${esc(rolesError)}</div>`;
+  } else {
+    const customRoles = (roles || []).filter(r => !r.isBuiltin);
+    const visible     = showBuiltin ? (roles||[]) : customRoles;
+    if (visible.length === 0) {
+      rolesHtml = `<div class="text-xs text-gray-600 p-2">No ${showBuiltin?'':'custom '}roles</div>`;
+    } else {
+      rolesHtml = `<table class="dt text-xs w-full">
+        <thead><tr><th>Role</th><th>DB</th><th>Inherited</th><th></th></tr></thead>
+        <tbody>
+        ${visible.map(r => {
+          const inh = (r.inheritedRoles||[]).map(x => esc(typeof x==='string'?x:x.role)).join(', ') || '—';
+          const actions = r.isBuiltin ? '<span class="text-gray-700 text-xs">built-in</span>' : [
+            canSync ? `<button onclick="event.stopPropagation();openSyncModal('role','${esc(r.name)}','${esc(db)}','${esc(shardUri)}')" class="btn-xs" title="Sync role to other shards">🔄</button>` : '',
+            canWrite ? `<button onclick="event.stopPropagation();openEditRoleModalFrom('${esc(r.name)}','${esc(db)}','${esc(shardUri)}')" class="btn-xs">✏️</button>` : '',
+            canWrite ? `<button onclick="event.stopPropagation();openDeleteShardModal('role','${esc(r.name)}','${esc(db)}','${esc(shardUri)}')" class="btn-xs">🗑</button>` : '',
+          ].filter(Boolean).join(' ');
+          return `<tr>
+            <td class="mono font-semibold ${r.isBuiltin?'text-gray-500':'text-mg'}">${esc(r.name)}</td>
+            <td class="mono text-xs text-gray-500">${esc(r.db||db)}</td>
+            <td class="text-xs text-gray-500 truncate max-w-[180px]">${inh}</td>
+            <td class="text-right whitespace-nowrap">${actions}</td>
+          </tr>`;
+        }).join('')}
+        </tbody></table>`;
+    }
   }
+
+  // ── Users ──────────────────────────────────────────────────────────────────
+  let usersHtml = '';
+  if (usersError) {
+    usersHtml = `<div class="text-xs text-red-300 p-2">${esc(usersError)}</div>`;
+  } else if (!(users||[]).length) {
+    usersHtml = `<div class="text-xs text-gray-600 p-2">No users in <span class="mono">${esc(db)}</span></div>`;
+  } else {
+    usersHtml = `<table class="dt text-xs w-full">
+      <thead><tr><th>User</th><th>Auth DB</th><th>Roles</th><th></th></tr></thead>
+      <tbody>
+      ${users.map(u => {
+        const roleChips = (u.roles||[]).map(r => `<span class="mb b-ok" style="font-size:.6rem">${esc(typeof r==='string'?r:r.role)}</span>`).join(' ') || '<span class="text-gray-600">—</span>';
+        const actions   = [
+          canSync  ? `<button onclick="openSyncModal('user','${esc(u.username)}','${esc(u.database||db)}','${esc(shardUri)}')" class="btn-xs" title="Sync user to other shards">🔄</button>` : '',
+          canWrite ? `<button onclick="editUserRolesFrom('${esc(u.username)}','${esc(u.database||db)}','${esc(shardUri)}')" class="btn-xs">✏️ Roles</button>` : '',
+          canWrite ? `<button onclick="openDeleteShardModal('user','${esc(u.username)}','${esc(u.database||db)}','${esc(shardUri)}')" class="btn-xs">🗑</button>` : '',
+        ].filter(Boolean).join(' ');
+        return `<tr>
+          <td class="mono font-semibold">${esc(u.username)}</td>
+          <td class="mono text-xs text-gray-500">${esc(u.database||db)}</td>
+          <td class="text-xs">${roleChips}</td>
+          <td class="text-right whitespace-nowrap">${actions}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>`;
+  }
+
+  const customCount = (roles||[]).filter(r=>!r.isBuiltin).length;
+  return `<div class="card">
+    <div class="card-header">${shardLabel}
+      <div class="ml-auto flex gap-2">
+
+      </div>
+    </div>
+    <div class="p-3 border-b border-panel-border">
+      <div class="flex items-center gap-2 mb-2 text-xs">
+        <span class="font-semibold text-gray-400 uppercase">Roles</span>
+        <span class="text-gray-600">${customCount} custom${(roles||[]).length > customCount ? ' · '+((roles||[]).length-customCount)+' built-in hidden' : ''}</span>
+      </div>
+      ${rolesHtml}
+    </div>
+    <div class="p-3">
+      <div class="text-xs font-semibold text-gray-400 uppercase mb-2">Users <span class="text-gray-600 font-normal">${(users||[]).length}</span></div>
+      ${usersHtml}
+    </div>
+  </div>`;
 }
 
-function setUsersRolesURI(u) { usersRolesURI = u; usersRoles(); }
+
+// Wrappers so per-shard action buttons can pass an explicit URI without
+// touching the global usersRolesURI.
+async function editUserRolesFrom(username, db, shardUri) {
+  await editUserRoles(username, db, shardUri);
+}
+async function deleteUserFrom(username, db, shardUri) {
+  // Legacy path — prefer openDeleteShardModal for shard section
+  if (!confirm(`Delete user "${username}" on ${extractShardIdFromUri(shardUri)}?`)) return;
+  const r = await api('/api/user/delete-user', {uri: shardUri, username, db});
+  if (r && r.error) return toast(r.error, 'error');
+  toast((r && r.message) || 'User deleted', 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+
+// Cluster-wide delete via mongos with an informative confirm.
+async function deleteFromMongos(kind, name, db, mongosUri) {
+  const kindLabel = kind === 'user' ? 'user' : 'role';
+  if (!confirm(`Delete ${kindLabel} "${name}" cluster-wide via mongos?\n\nThis removes the ${kindLabel} from the config server and all mongos instances. It does not affect shard-local users/roles — use the shard cards for those.`)) return;
+  const endpoint = kind === 'user' ? '/api/user/delete-user' : '/api/user/delete-role';
+  const params   = kind === 'user' ? {uri: mongosUri, username: name, db} : {uri: mongosUri, roleName: name, db};
+  const r = await api(endpoint, params);
+  if (r && r.error) return toast(r.error, 'error');
+  toast(`${kind === 'user' ? 'User' : 'Role'} deleted cluster-wide`, 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+
+// State for the delete-from-shards modal
+let _deleteShardState = null;
+
+// Open a confirmation modal listing all shard nodes (all pre-checked, no configsvr).
+// The DBA can uncheck specific shards before confirming.
+function openDeleteShardModal(kind, name, db, srcShardUri) {
+  _deleteShardState = {kind, name, db, srcShardUri};
+  document.getElementById('deleteShardModal').classList.add('open');
+  document.getElementById('deleteShardTitle').textContent =
+    kind === 'user' ? `🗑 Delete user "${name}"` : `🗑 Delete role "${name}"`;
+  document.getElementById('deleteShardIntro').innerHTML =
+    `Select the shards to delete <code class="mono text-mg">${esc(name)}</code> from.
+     <span class="text-gray-500"> db: <span class="mono">${esc(db)}</span></span>`;
+  document.getElementById('deleteShardResultsWrap').classList.add('hidden');
+  document.getElementById('deleteShardResults').innerHTML = '';
+  document.getElementById('deleteShardConfirmBtn').disabled = false;
+  document.getElementById('deleteShardConfirmBtn').textContent = 'Delete';
+
+  // Shard nodes only — configsvr and mongos are deliberately excluded
+  const nodes = rsNodesList().filter(n => n.role === 'shard');
+  if (nodes.length === 0) {
+    document.getElementById('deleteShardShardList').innerHTML =
+      '<div class="text-gray-500 text-xs">No shard members discovered.</div>';
+    return;
+  }
+  const srcBase = (srcShardUri || '').split('?')[0];
+  document.getElementById('deleteShardShardList').innerHTML = nodes.map(n => {
+    const base  = injectCredsIntoUri(n.uri);
+    const ppUri = base + (base.includes('?')?'&':'?') + 'readPreference=primaryPreferred';
+    const isSrc = ppUri.startsWith(srcBase) || srcBase.startsWith(base);
+    return `<label class="flex items-center gap-2 cursor-pointer text-xs py-0.5">
+      <input type="checkbox" class="delete-shard-cb" data-target="${esc(ppUri)}" checked>
+      <span class="mono">${esc(n.id)}</span>
+      ${isSrc ? '<span class="text-gray-500 text-xs">(current)</span>' : ''}
+    </label>`;
+  }).join('');
+}
+function closeDeleteShardModal() {
+  document.getElementById('deleteShardModal').classList.remove('open');
+  _deleteShardState = null;
+}
+async function executeDeleteFromShards() {
+  if (!_deleteShardState) return;
+  const {kind, name, db} = _deleteShardState;
+  const checked = Array.from(document.querySelectorAll('.delete-shard-cb:checked'));
+  if (checked.length === 0) { toast('Select at least one shard', 'error'); return; }
+  const btn = document.getElementById('deleteShardConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  const endpoint = kind === 'user' ? '/api/user/delete-user' : '/api/user/delete-role';
+  const results = await Promise.all(checked.map(async cb => {
+    const t  = cb.dataset.target;
+    const params = kind === 'user' ? {uri: t, username: name, db} : {uri: t, roleName: name, db};
+    const r = await api(endpoint, params);
+    return {shardId: extractShardIdFromUri(t), ok: !(r&&r.error), error: r?.error||''};
+  }));
+  document.getElementById('deleteShardResults').innerHTML = results.map(r => r.ok
+    ? `<div><span class="text-mg">✓</span> <span class="mono">${esc(r.shardId)}</span> — deleted</div>`
+    : `<div><span class="text-red-400">✗</span> <span class="mono">${esc(r.shardId)}</span> — <span class="text-red-300">${esc(r.error)}</span></div>`
+  ).join('');
+  document.getElementById('deleteShardResultsWrap').classList.remove('hidden');
+  btn.disabled = false; btn.textContent = 'Delete';
+  const ok = results.filter(x=>x.ok).length;
+  toast(`Deleted from ${ok} / ${results.length} shard${results.length>1?'s':''}`, ok===results.length?'success':'error');
+  if (results.every(x=>x.ok)) setTimeout(() => { closeDeleteShardModal(); usersRoles(); }, 800);
+}
+async function openEditRoleModalFrom(roleName, db, shardUri) {
+  await openEditRoleModal(roleName, db, shardUri);
+}
+async function deleteRoleFrom(roleName, db, shardUri) {
+  if (!confirm(`Delete role "${roleName}" on ${extractShardIdFromUri(shardUri)}?`)) return;
+  const r = await api('/api/user/delete-role', {uri: shardUri, roleName, db});
+  if (r && r.error) return toast(r.error, 'error');
+  toast((r && r.message) || 'Role deleted', 'success');
+  setTimeout(() => usersRoles(), 600);
+}
+
+
 
 // Toggle role detail row and lazy-load privileges
 async function toggleRoleDetail(detailId, roleName, db) {
@@ -2308,75 +2827,222 @@ function _populateRolePicker(pickerId) {
     }).join('');
 }
 
-async function openCreateRoleModal(db) {
+// Populate the "Modify on" checkbox list for edit modals.
+// Mongos (cluster-wide) is always shown first; shard nodes follow.
+// Presence is checked on all targets so only places where the user/role
+// already exists are enabled — greyed-out rows show "not found" and
+// point the DBA toward 🔄 Sync instead.
+// Only the source target (where ✏️ was clicked) is pre-checked by default;
+// other present targets are enabled but unchecked so the DBA opts-in.
+async function _loadModifyOnCheckboxes(kind, name, db, sourceUri, listElId) {
+  const el = document.getElementById(listElId);
+  if (!el) return;
+  el.innerHTML = '<div class="text-gray-500 text-xs flex gap-2 items-center"><span class="spinner"></span>Checking presence…</div>';
+
+  const mongosUri = uri; // connected mongos — cluster-wide target
+  const shards    = rsNodesList().filter(n => n.role === 'shard');
+
+  // Build ordered target list: mongos first, then shards
+  const targets = [
+    {tUri: mongosUri, label: 'Cluster-wide <span class="text-gray-500">(mongos)</span>', isMongos: true},
+    ...shards.map(n => {
+      const base  = injectCredsIntoUri(n.uri);
+      const ppUri = base + (base.includes('?')?'&':'?') + 'readPreference=primaryPreferred';
+      return {tUri: ppUri, label: `<span class="mono">${esc(n.id)}</span>`, isMongos: false};
+    }),
+  ];
+
+  // Single check-presence call covering all targets at once
+  let presence = [];
+  try {
+    const r = await api('/api/user/check-presence', {
+      uri: sourceUri || mongosUri, kind, name, db,
+      targetUri: targets.map(t => t.tUri),
+    });
+    if (Array.isArray(r)) presence = r;
+  } catch (_) { /* fallback to "unknown" — still render with presence unknown */ }
+
+  const srcBase = (sourceUri || '').split('?')[0];
+
+  el.innerHTML = targets.map((t, i) => {
+    const p       = presence[i] || {};
+    const isSource= t.tUri === srcBase
+                  || t.tUri.startsWith(srcBase)
+                  || srcBase.startsWith(t.tUri.split('?')[0]);
+    const exists  = isSource ? true : !!p.exists;
+    const hasErr  = !isSource && p.error;
+    const checked = isSource ? 'checked' : '';
+    const disabled= (!exists || hasErr) ? 'disabled' : '';
+    const badge   = isSource ? '<span class="text-gray-500 text-xs">(source)</span>'
+      : hasErr    ? `<span class="text-red-400 text-xs" title="${esc(p.error||'')}">error</span>`
+      : exists    ? ''
+                  : '<span class="text-gray-700 text-xs">not found — use 🔄 Sync</span>';
+    return `<label class="flex items-center gap-2 cursor-pointer py-0.5 ${!exists&&!isSource?'opacity-40':''}">
+      <input type="checkbox" class="modify-on-cb" data-target="${esc(t.tUri)}" ${checked} ${disabled}>
+      ${t.label} ${badge}
+    </label>`;
+  }).join('');
+}
+
+// Build the unified "Create on" checkbox list: mongos (checked) + shards (unchecked).
+function _buildCreateOnList(listElId) {
+  const el = document.getElementById(listElId);
+  if (!el) return;
+  const mongosUri = uri;
+  const shards    = rsNodesList().filter(n => n.role === 'shard');
+  if (shards.length === 0 && !mongosUri) { el.innerHTML = ''; return; }
+  const rows = [];
+  rows.push(`<label class="flex items-center gap-2 cursor-pointer text-xs py-0.5">
+    <input type="checkbox" class="create-target-cb" data-uri="${esc(mongosUri)}" checked>
+    Cluster-wide <span class="text-gray-500">(mongos)</span>
+  </label>`);
+  for (const n of shards) {
+    const nUri = injectCredsIntoUri(n.uri);
+    rows.push(`<label class="flex items-center gap-2 cursor-pointer text-xs py-0.5">
+      <input type="checkbox" class="create-target-cb" data-uri="${esc(nUri)}">
+      <span class="mono">${esc(n.id)}</span>
+    </label>`);
+  }
+  el.innerHTML = rows.join('');
+}
+
+async function openCreateRoleModal(db, srcUri) {
   document.getElementById('createRoleDb').value = db;
   document.getElementById('createRoleIsEdit').value = '';
+  document.getElementById('createRoleTargetUri').value = srcUri || uri;
   document.getElementById('createRoleName').value = '';
   document.getElementById('createRoleName').readOnly = false;
-  document.getElementById('createRoleTitle').textContent = '🔐 Create Role';
+  document.getElementById('createRoleTitle').textContent = '\ud83d\udd10 Create Role';
   document.getElementById('createRoleSubmitBtn').textContent = 'Create';
+  document.getElementById('createRoleResultsWrap').classList.add('hidden');
+  document.getElementById('createRoleResults').innerHTML = '';
+  document.getElementById('createRoleModifyOnBlock').classList.add('hidden');
   _rolePrivileges = []; _roleInherited = [];
   _privRender(); _inheritRender();
-  // Fetch available roles for picker
-  const res = await api('/api/user/roles', {uri: usersRolesURI, db});
+  const res = await api('/api/user/roles', {uri: srcUri || uri, db});
   _availableRoles = Array.isArray(res) ? res : [];
   _populateRolePicker('inheritRolePicker');
+  // Unified create-on list: mongos first (checked), shards below (unchecked)
+  const tb = document.getElementById('createRoleTargetsBlock');
+  if (rsNodesList().length > 0 || topology.type === 'sharded') {
+    _buildCreateOnList('createRoleTargetsList');
+    tb.classList.remove('hidden');
+  } else { tb.classList.add('hidden'); }
   document.getElementById('createRoleModal').classList.add('open');
   document.getElementById('createRoleName').focus();
 }
 
-async function openEditRoleModal(roleName, db) {
+async function openEditRoleModal(roleName, db, targetUri) {
+  const tUri = targetUri || uri;
   document.getElementById('createRoleDb').value = db;
   document.getElementById('createRoleIsEdit').value = '1';
+  document.getElementById('createRoleTargetUri').value = tUri;
   document.getElementById('createRoleName').value = roleName;
   document.getElementById('createRoleName').readOnly = true;
-  document.getElementById('createRoleTitle').textContent = '✏️ Edit Role: ' + roleName;
+  document.getElementById('createRoleTitle').textContent = '\u270f\ufe0f Edit Role: ' + roleName;
   document.getElementById('createRoleSubmitBtn').textContent = 'Save';
+  document.getElementById('createRoleResultsWrap').classList.add('hidden');
+  document.getElementById('createRoleTargetsBlock').classList.add('hidden');
+  document.getElementById('createRoleModifyOnBlock').classList.remove('hidden');
+  document.getElementById('createRoleModifyList').innerHTML =
+    '<div class="text-gray-500 text-xs flex gap-2 items-center"><span class="spinner"></span>Checking presence\u2026</div>';
   _rolePrivileges = []; _roleInherited = [];
   _privRender(); _inheritRender();
-  // Fetch full role detail
+  // Fetch role detail + available roles from target shard
   const [detailRes, allRolesRes] = await Promise.all([
-    api('/api/user/role-detail', {uri: usersRolesURI, db, roleName}),
-    api('/api/user/roles', {uri: usersRolesURI, db}),
+    api('/api/user/role-detail', {uri: tUri, db, roleName}),
+    api('/api/user/roles',       {uri: tUri, db}),
   ]);
   _availableRoles = Array.isArray(allRolesRes) ? allRolesRes.filter(r => r.name !== roleName) : [];
   _populateRolePicker('inheritRolePicker');
   if (detailRes && !detailRes.error) {
-    // MongoDB rolesInfo returns:
-    //   detailRes.roles          = direct parent roles [{role, db}]  ← what we edit
-    //   detailRes.inheritedRoles = transitive closure  [{role, db}]  ← read-only expansion
-    _roleInherited = (detailRes.roles || []).map(r => {
-      if (typeof r === 'string') return {role: r, db};
-      return {role: r.role || '', db: r.db || db};
-    });
+    _roleInherited = (detailRes.roles || []).map(r =>
+      typeof r === 'string' ? {role: r, db} : {role: r.role||'', db: r.db||db});
     _rolePrivileges = (detailRes.privileges || []).map(p => ({
-      resource: p.resource || {db:'', collection:''},
-      actions: p.actions || [],
+      resource: p.resource || {db:'', collection:''}, actions: p.actions || [],
     }));
   }
   _privRender(); _inheritRender();
+  // Async: load presence-check checkboxes
+  _loadModifyOnCheckboxes('role', roleName, db, tUri, 'createRoleModifyList');
   document.getElementById('createRoleModal').classList.add('open');
 }
-
-function closeCreateRoleModal() { document.getElementById('createRoleModal').classList.remove('open'); }
 
 async function submitCreateRole() {
   const name   = document.getElementById('createRoleName').value.trim();
   const db     = document.getElementById('createRoleDb').value;
   const isEdit = document.getElementById('createRoleIsEdit').value === '1';
   if (!name) { toast('Role name required', 'error'); return; }
-  const privileges   = JSON.stringify(_rolePrivileges);
+  const privileges     = JSON.stringify(_rolePrivileges);
   const inheritedRoles = JSON.stringify(_roleInherited);
-  let r;
   if (isEdit) {
-    r = await api('/api/user/update-role', {uri: usersRolesURI, roleName: name, db, privileges, inheritedRoles});
-  } else {
-    r = await api('/api/user/create-role', {uri: usersRolesURI, roleName: name, db, privileges, inheritedRoles});
+    const tUri     = document.getElementById('createRoleTargetUri').value || uri;
+    const _rModal  = document.getElementById('createRoleModal');
+    const checked  = Array.from(_rModal.querySelectorAll('.modify-on-cb:checked'));
+    const targets  = checked.length > 0 ? checked.map(cb => cb.dataset.target) : [tUri];
+    if (targets.length === 1) {
+      const r = await api('/api/user/update-role', {uri: targets[0], roleName: name, db, privileges, inheritedRoles});
+      closeCreateRoleModal();
+      if (r && r.error) return toast(r.error, 'error');
+      toast(r?.message || 'Role updated', 'success');
+      setTimeout(() => usersRoles(), 600);
+      return;
+    }
+    // Multi-target edit
+    document.getElementById('createRoleSubmitBtn').disabled = true;
+    document.getElementById('createRoleSubmitBtn').textContent = 'Saving…';
+    const results = await Promise.all(targets.map(async t => {
+      const r = await api('/api/user/update-role', {uri: t, roleName: name, db, privileges, inheritedRoles});
+      return {shardId: extractShardIdFromUri(t), ok: !(r&&r.error), error: r?.error||''};
+    }));
+    document.getElementById('createRoleResults').innerHTML = results.map(r => r.ok
+      ? `<div><span class="text-mg">✓</span> <span class="mono">${esc(r.shardId)}</span></div>`
+      : `<div><span class="text-red-400">✗</span> <span class="mono">${esc(r.shardId)}</span> — <span class="text-red-300">${esc(r.error)}</span></div>`
+    ).join('');
+    document.getElementById('createRoleResultsWrap').classList.remove('hidden');
+    document.getElementById('createRoleSubmitBtn').disabled = false;
+    document.getElementById('createRoleSubmitBtn').textContent = 'Save';
+    const okCount = results.filter(x=>x.ok).length;
+    if (results.every(x=>x.ok)) {
+      toast(`Role updated on ${okCount} shard${okCount>1?'s':''}`, 'success');
+      setTimeout(() => { closeCreateRoleModal(); usersRoles(); }, 1000);
+    } else {
+      toast(`Updated on ${okCount} / ${results.length} shards`, 'error');
+    }
+    return;
   }
-  closeCreateRoleModal();
-  if (r && r.error) return toast(r.error, 'error');
-  toast(r?.message || (isEdit ? 'Role updated' : 'Role created'), 'success');
-  setTimeout(() => usersRoles(), 600);
+  // Create — collect checked targets scoped to THIS modal only.
+  // Global querySelectorAll would also pick up checkboxes in the sibling
+  // Create User modal (same class name), resulting in duplicate API calls.
+  const _roleModal    = document.getElementById('createRoleModal');
+  const createTargetUri = document.getElementById('createRoleTargetUri').value || uri;
+  const checked = Array.from(_roleModal.querySelectorAll('.create-target-cb:checked'));
+  const targets = checked.length > 0 ? checked.map(cb => cb.dataset.uri) : [createTargetUri];
+  if (targets.length === 1) {
+    const r = await api('/api/user/create-role', {uri: targets[0], roleName: name, db, privileges, inheritedRoles});
+    closeCreateRoleModal();
+    if (r && r.error) return toast(r.error, 'error');
+    toast(r?.message || 'Role created', 'success');
+    setTimeout(() => usersRoles(), 600);
+    return;
+  }
+  document.getElementById('createRoleSubmitBtn').disabled = true;
+  document.getElementById('createRoleSubmitBtn').textContent = 'Creating…';
+  const results = await Promise.all(targets.map(async t => {
+    const r = await api('/api/user/create-role', {uri: t, roleName: name, db, privileges, inheritedRoles});
+    return {shardId: extractShardIdFromUri(t), ok: !(r && r.error), error: r && r.error ? r.error : ''};
+  }));
+  const okCount   = results.filter(x=>x.ok).length;
+  const failCount = results.filter(x=>!x.ok).length;
+  document.getElementById('createRoleResults').innerHTML = results.map(r => r.ok
+    ? '<div><span class="text-mg">✓</span> <span class="mono">' + esc(r.shardId) + '</span> — created</div>'
+    : '<div><span class="text-red-400">✗</span> <span class="mono">' + esc(r.shardId) + '</span> — <span class="text-red-300">' + esc(r.error) + '</span></div>'
+  ).join('');
+  document.getElementById('createRoleResultsWrap').classList.remove('hidden');
+  document.getElementById('createRoleSubmitBtn').disabled = false;
+  document.getElementById('createRoleSubmitBtn').textContent = 'Create';
+  if (failCount === 0) { toast('Role created on ' + okCount + ' shard' + (okCount>1?'s':''), 'success'); setTimeout(() => { closeCreateRoleModal(); usersRoles(); }, 1200); }
+  else { toast('Created on ' + okCount + ', failed on ' + failCount, 'error'); }
 }
 
 // ── USER MODAL ─────────────────────────────────────────────────────────────────
@@ -2407,57 +3073,72 @@ function userRoleAdd() {
   sel.value = '';
 }
 
-async function openCreateUserModal(db) {
+async function openCreateUserModal(db, srcUri) {
   document.getElementById('createUserDb').value = db;
   document.getElementById('createUserIsEdit').value = '';
+  document.getElementById('createUserTargetUri').value = srcUri || uri;
   document.getElementById('createUsername').value = '';
   document.getElementById('createUsername').readOnly = false;
   document.getElementById('createUserPass').value = '';
   document.getElementById('createUserPassRow').style.display = '';
-  document.getElementById('createUserTitle').textContent = '👤 Create User';
+  document.getElementById('createUserTitle').textContent = '\ud83d\udc64 Create User';
   document.getElementById('createUserSubmitBtn').textContent = 'Create';
+  document.getElementById('createUserResultsWrap').classList.add('hidden');
+  document.getElementById('createUserResults').innerHTML = '';
+  document.getElementById('createUserModifyOnBlock').classList.add('hidden');
   _userRoles = [];
   _userRoleRender();
-  const res = await api('/api/user/roles', {uri: usersRolesURI, db});
+  const res = await api('/api/user/roles', {uri: srcUri || uri, db});
   _availableRoles = Array.isArray(res) ? res : [];
   const sel = document.getElementById('userRolePicker');
-  if (sel) sel.innerHTML = '<option value="">Pick a role…</option>' +
-    _availableRoles.map(r => { const rdb = r.db||''; return `<option value="${esc(r.name+'||'+rdb)}">${esc(r.name)} (${esc(rdb)})</option>`; }).join('');
+  if (sel) sel.innerHTML = '<option value="">Pick a role\u2026</option>' +
+    _availableRoles.map(r => { const rdb = r.db||''; return '<option value="' + esc(r.name+'||'+rdb) + '">' + esc(r.name) + ' (' + esc(rdb) + ')</option>'; }).join('');
+  // Unified create-on list: mongos first (checked), shards below (unchecked)
+  const tb = document.getElementById('createUserTargetsBlock');
+  if (rsNodesList().length > 0 || topology.type === 'sharded') {
+    _buildCreateOnList('createUserTargetsList');
+    tb.classList.remove('hidden');
+  } else { tb.classList.add('hidden'); }
   document.getElementById('createUserModal').classList.add('open');
   document.getElementById('createUsername').focus();
 }
 
-async function editUserRoles(username, db) {
+async function editUserRoles(username, db, targetUri) {
+  const tUri = targetUri || uri;
   document.getElementById('createUserDb').value = db;
   document.getElementById('createUserIsEdit').value = '1';
+  document.getElementById('createUserTargetUri').value = tUri;
   document.getElementById('createUsername').value = username;
   document.getElementById('createUsername').readOnly = true;
   document.getElementById('createUserPass').value = '';
   document.getElementById('createUserPassRow').style.display = 'none';
-  document.getElementById('createUserTitle').textContent = '✏️ Edit User: ' + username;
+  document.getElementById('createUserTitle').textContent = '\u270f\ufe0f Edit User: ' + username;
   document.getElementById('createUserSubmitBtn').textContent = 'Save';
+  document.getElementById('createUserResultsWrap').classList.add('hidden');
+  document.getElementById('createUserTargetsBlock').classList.add('hidden');
+  document.getElementById('createUserModifyOnBlock').classList.remove('hidden');
+  document.getElementById('createUserModifyList').innerHTML =
+    '<div class="text-gray-500 text-xs flex gap-2 items-center"><span class="spinner"></span>Checking presence\u2026</div>';
   _userRoles = [];
   _userRoleRender();
-  // Fetch current user info + available roles
   const [usersRes, rolesRes] = await Promise.all([
-    api('/api/user/users', {uri: usersRolesURI, db}),
-    api('/api/user/roles', {uri: usersRolesURI, db}),
+    api('/api/user/users', {uri: tUri, db}),
+    api('/api/user/roles', {uri: tUri, db}),
   ]);
   _availableRoles = Array.isArray(rolesRes) ? rolesRes : [];
   const sel = document.getElementById('userRolePicker');
-  if (sel) sel.innerHTML = '<option value="">Pick a role…</option>' +
-    _availableRoles.map(r => { const rdb = r.db||''; return `<option value="${esc(r.name+'||'+rdb)}">${esc(r.name)} (${esc(rdb)})</option>`; }).join('');
-  // Populate current roles
+  if (sel) sel.innerHTML = '<option value="">Pick a role\u2026</option>' +
+    _availableRoles.map(r => { const rdb = r.db||''; return '<option value="' + esc(r.name+'||'+rdb) + '">' + esc(r.name) + ' (' + esc(rdb) + ')</option>'; }).join('');
   if (Array.isArray(usersRes)) {
     const user = usersRes.find(u => u.username === username);
-    if (user) {
-      _userRoles = (user.roles || []).map(role => ({role, db}));
-      _userRoleRender();
-    }
+    if (user) { _userRoles = (user.roles||[]).map(role => ({role, db})); _userRoleRender(); }
   }
+  // Async: load presence-check checkboxes
+  _loadModifyOnCheckboxes('user', username, db, tUri, 'createUserModifyList');
   document.getElementById('createUserModal').classList.add('open');
 }
 
+function closeCreateRoleModal() { document.getElementById('createRoleModal').classList.remove('open'); }
 function closeCreateUserModal() { document.getElementById('createUserModal').classList.remove('open'); }
 
 async function submitCreateUser() {
@@ -2468,16 +3149,87 @@ async function submitCreateUser() {
   if (!username) { toast('Username required', 'error'); return; }
   if (!isEdit && !password) { toast('Password required', 'error'); return; }
   const roles = JSON.stringify(_userRoles);
-  let r;
+
   if (isEdit) {
-    r = await api('/api/user/set-user-roles', {uri: usersRolesURI, username, db, roles});
-  } else {
-    r = await api('/api/user/create-user', {uri: usersRolesURI, username, password, db, roles});
+    const tUri    = document.getElementById('createUserTargetUri').value || uri;
+    const _uModal = document.getElementById('createUserModal');
+    const checked = Array.from(_uModal.querySelectorAll('.modify-on-cb:checked'));
+    const targets = checked.length > 0 ? checked.map(cb => cb.dataset.target) : [tUri];
+    if (targets.length === 1) {
+      const r = await api('/api/user/set-user-roles', {uri: targets[0], username, db, roles});
+      closeCreateUserModal();
+      if (r && r.error) return toast(r.error, 'error');
+      toast(r?.message || 'User updated', 'success');
+      setTimeout(() => usersRoles(), 600);
+      return;
+    }
+    document.getElementById('createUserSubmitBtn').disabled = true;
+    document.getElementById('createUserSubmitBtn').textContent = 'Saving…';
+    const results = await Promise.all(targets.map(async t => {
+      const r = await api('/api/user/set-user-roles', {uri: t, username, db, roles});
+      return {shardId: extractShardIdFromUri(t), ok: !(r&&r.error), error: r?.error||''};
+    }));
+    document.getElementById('createUserResults').innerHTML = results.map(r => r.ok
+      ? `<div><span class="text-mg">✓</span> <span class="mono">${esc(r.shardId)}</span></div>`
+      : `<div><span class="text-red-400">✗</span> <span class="mono">${esc(r.shardId)}</span> — <span class="text-red-300">${esc(r.error)}</span></div>`
+    ).join('');
+    document.getElementById('createUserResultsWrap').classList.remove('hidden');
+    document.getElementById('createUserSubmitBtn').disabled = false;
+    document.getElementById('createUserSubmitBtn').textContent = 'Save';
+    const okCount = results.filter(x=>x.ok).length;
+    if (results.every(x=>x.ok)) {
+      toast(`User updated on ${okCount} shard${okCount>1?'s':''}`, 'success');
+      setTimeout(() => { closeCreateUserModal(); usersRoles(); }, 1000);
+    } else {
+      toast(`Updated on ${okCount} / ${results.length} shards`, 'error');
+    }
+    return;
   }
-  closeCreateUserModal();
-  if (r && r.error) return toast(r.error, 'error');
-  toast(r?.message || (isEdit ? 'User updated' : 'User created'), 'success');
-  setTimeout(() => usersRoles(), 600);
+
+  // Create — scoped to this modal only to avoid picking up checkboxes
+  // from the sibling Create Role modal (same class names).
+  const _userModal    = document.getElementById('createUserModal');
+  const createTargetUri = document.getElementById('createUserTargetUri').value || uri;
+  const checked = Array.from(_userModal.querySelectorAll('.create-target-cb:checked'));
+  const targets = checked.length > 0 ? checked.map(cb => cb.dataset.uri) : [createTargetUri];
+
+  if (targets.length === 1) {
+    // Single target — simple path, same as before
+    const r = await api('/api/user/create-user', {uri: targets[0], username, password, db, roles});
+    closeCreateUserModal();
+    if (r && r.error) return toast(r.error, 'error');
+    toast(r?.message || 'User created', 'success');
+    setTimeout(() => usersRoles(), 600);
+    return;
+  }
+
+  // Multi-target — fire in parallel and show per-shard results
+  document.getElementById('createUserSubmitBtn').disabled = true;
+  document.getElementById('createUserSubmitBtn').textContent = 'Creating…';
+  const results = await Promise.all(targets.map(async t => {
+    const r = await api('/api/user/create-user', {uri: t, username, password, db, roles});
+    const shardId = extractShardIdFromUri(t);
+    if (r && r.error) return {shardId, ok: false, error: r.error};
+    return {shardId, ok: true};
+  }));
+
+  const okCount   = results.filter(x=>x.ok).length;
+  const failCount = results.filter(x=>!x.ok).length;
+  const html = results.map(r => r.ok
+    ? `<div><span class="text-mg">✓</span> <span class="mono">${esc(r.shardId)}</span> — created</div>`
+    : `<div><span class="text-red-400">✗</span> <span class="mono">${esc(r.shardId)}</span> — <span class="text-red-300">${esc(r.error)}</span></div>`
+  ).join('');
+  document.getElementById('createUserResults').innerHTML = html;
+  document.getElementById('createUserResultsWrap').classList.remove('hidden');
+  document.getElementById('createUserSubmitBtn').disabled = false;
+  document.getElementById('createUserSubmitBtn').textContent = 'Create';
+
+  if (failCount === 0) {
+    toast(`User created on ${okCount} shard${okCount>1?'s':''}`, 'success');
+    setTimeout(() => { closeCreateUserModal(); usersRoles(); }, 1200);
+  } else {
+    toast(`Created on ${okCount} shard(s), failed on ${failCount} — see modal`, failCount>0?'error':'success');
+  }
 }
 
 async function deleteUser(username, db) {
@@ -2487,8 +3239,208 @@ async function deleteUser(username, db) {
   toast((r && r.message) || 'User deleted', 'success');
   setTimeout(() => usersRoles(), 600);
 }
+
+// ─── Cross-shard sync of a single user or role ────────────────────────────
+// In sharded clusters, shard-local users and roles aren't automatically
+// replicated across shards. This flow lets a DBA pick one user/role on the
+// currently selected shard and push it to every other shard that's missing it.
+
+let _syncState = null; // {kind, name, db, srcUri, presence: [...]}
+
+async function openSyncModal(kind, name, db, srcUri){
+  _syncState = {kind, name, db, srcUri: srcUri || usersRolesURI, presence: []};
+
+  const modal = document.getElementById('syncModal');
+  modal.classList.add('open');
+  document.getElementById('syncModalTitle').textContent =
+    kind === 'user' ? `🔄 Sync user "${name}" to other shards`
+                    : `🔄 Sync role "${name}" to other shards`;
+  document.getElementById('syncModalIntro').innerHTML = kind === 'user'
+    ? `Copies <code class="mono text-mg">${esc(name)}</code> (db <code class="mono">${esc(db)}</code>) to each selected shard. Choose sync mode and whether to overwrite if the user already exists.`
+    : `Copies <code class="mono text-mg">${esc(name)}</code> (db <code class="mono">${esc(db)}</code>) — privileges and inherited roles — to each selected shard.`;
+
+  document.getElementById('syncModeBlock').classList.toggle('hidden', kind !== 'user');
+  document.getElementById('syncUpdateBlock').classList.toggle('hidden', kind !== 'user');
+  document.getElementById('syncUpdateIfExists').checked = false;
+  const ptRadio = document.querySelector('input[name="syncMode"][value="plaintext"]');
+  if (ptRadio) ptRadio.checked = true;
+  document.getElementById('syncCloneWarn').classList.add('hidden');
+  document.getElementById('syncPasswordBlock').classList.toggle('hidden', kind !== 'user');
+  document.getElementById('syncPassword').value = '';
+  document.getElementById('syncResultsWrap').classList.add('hidden');
+  document.getElementById('syncResults').innerHTML = '';
+  document.getElementById('syncConfirmBtn').disabled = false;
+  document.getElementById('syncConfirmBtn').textContent = 'Sync';
+
+  const targets = rsNodesList()
+    .map(n => injectCredsIntoUri(n.uri));
+  if (targets.length === 0) {
+    document.getElementById('syncShardList').innerHTML =
+      '<div class="text-gray-500 text-xs">No other shards discovered to sync to.</div>';
+    document.getElementById('syncConfirmBtn').disabled = true;
+    return;
+  }
+
+  document.getElementById('syncShardList').innerHTML =
+    '<div class="text-gray-500 text-xs flex items-center gap-2"><span class="spinner"></span>Checking presence on each shard…</div>';
+
+  const r = await api('/api/user/check-presence', {
+    uri: _syncState.srcUri, kind, name, db, targetUri: targets,
+  });
+
+  if (!Array.isArray(r)) {
+    document.getElementById('syncShardList').innerHTML =
+      `<div class="text-red-400 text-xs">${esc((r && r.error) || 'check-presence failed')}</div>`;
+    document.getElementById('syncConfirmBtn').disabled = true;
+    return;
+  }
+
+  _syncState.presence = r.map((p, idx) => ({...p, _targetUri: targets[idx]}));
+
+  // Source shard row is non-selectable; missing shards pre-checked; existing
+  // shards shown but unchecked (the "Update if exists" checkbox below the list
+  // unlocks them so the DBA can force a role-overwrite on an existing user).
+  const srcBase = _syncState.srcUri.replace(/[?&]readPreference=[^&]*/g,'').replace(/[?&]$/, '');
+  const rows = _syncState.presence.map((p) => {
+    const isSrc   = injectCredsIntoUri(p._targetUri||'').replace(/[?&]readPreference=[^&]*/g,'') === srcBase;
+    const missing = !p.exists;
+    const status  = isSrc   ? `<span class="text-gray-500">source</span>`
+      : p.error   ? `<span class="text-red-400" title="${esc(p.error)}">error</span>`
+      : missing   ? `<span class="text-yellow-400">missing</span>`
+                  : `<span class="text-mg">present</span>`;
+    const checked  = !isSrc && missing && !p.error ? 'checked' : '';
+    const disabled = isSrc || !!p.error ? 'disabled' : '';
+    return `<label class="flex items-center gap-3 py-1 cursor-pointer">
+      <input type="checkbox" data-target="${esc(p._targetUri)}" ${checked} ${disabled} class="sync-target-cb" data-exists="${p.exists?'1':'0'}">
+      <span class="mono text-xs text-gray-200">${esc(p.shardId || '(?)')}</span>
+      <span class="mono text-xs text-gray-600 ml-1">${esc(p.uri)}</span>
+      <span class="ml-auto text-xs">${status}</span>
+    </label>`;
+  }).join('');
+  document.getElementById('syncShardList').innerHTML = rows;
+}
+
+function closeSyncModal(){
+  document.getElementById('syncModal').classList.remove('open');
+  _syncState = null;
+}
+
+// Toggle the password block and the clone-mode warning based on the radio
+// state. Plaintext = password required, warning hidden. Clone = password
+// field hidden (no input needed), warning shown.
+function syncModeChanged(){
+  const mode = document.querySelector('input[name="syncMode"]:checked')?.value || 'plaintext';
+  const isClone = mode === 'clone';
+  document.getElementById('syncCloneWarn').classList.toggle('hidden', !isClone);
+  document.getElementById('syncPasswordBlock').classList.toggle('hidden', isClone);
+  // Clone mode does upsert natively; "update if exists" only applies to plaintext.
+  document.getElementById('syncUpdateBlock').classList.toggle('hidden', isClone);
+  if (isClone) document.getElementById('syncUpdateIfExists').checked = false;
+}
+
+// When "Update if exists" is toggled, enable/disable the checkboxes for
+// shards where the user is already present so the DBA can opt them into sync.
+function syncToggleUpdate(){
+  const enabled = document.getElementById('syncUpdateIfExists').checked;
+  document.querySelectorAll('.sync-target-cb[data-exists="1"]').forEach(cb => {
+    cb.disabled = !enabled;
+    if (!enabled) cb.checked = false;
+    else          cb.checked = true;   // default-check them when enabling
+  });
+}
+
+async function executeSyncOp(){
+  if (!_syncState) return;
+  const boxes = document.querySelectorAll('.sync-target-cb:checked');
+  if (boxes.length === 0) { toast('Select at least one shard to sync to', 'error'); return; }
+
+  const targets = Array.from(boxes).map(b => b.dataset.target);
+  const btn = document.getElementById('syncConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+
+  let endpoint, params;
+  if (_syncState.kind === 'user') {
+    const mode = document.querySelector('input[name="syncMode"]:checked')?.value || 'plaintext';
+    if (mode === 'clone') {
+      if (!confirm('Clone exact credentials via _mergeAuthzCollections?\n\nThis bypasses createUser validation and requires the `restore` role on every selected target. Continue?')) {
+        btn.disabled = false; btn.textContent = 'Sync';
+        return;
+      }
+      endpoint = '/api/user/sync-user';
+      params = { uri: _syncState.srcUri, username: _syncState.name,
+                 db: _syncState.db, mode: 'clone', targetUri: targets };
+    } else {
+      const pwd = document.getElementById('syncPassword').value;
+      if (!pwd) { toast('Password required for plaintext sync', 'error'); btn.disabled = false; btn.textContent='Sync'; return; }
+      const updateIfExists = document.getElementById('syncUpdateIfExists').checked ? '1' : '0';
+      endpoint = '/api/user/sync-user';
+      params = { uri: _syncState.srcUri, username: _syncState.name, password: pwd,
+                 db: _syncState.db, mode: 'plaintext', updateIfExists, targetUri: targets };
+    }
+  } else {
+    endpoint = '/api/user/sync-role';
+    params = {
+      uri: _syncState.srcUri,
+      roleName: _syncState.name,
+      db: _syncState.db,
+      targetUri: targets,
+    };
+  }
+
+  const r = await api(endpoint, params);
+  if (!Array.isArray(r)) {
+    document.getElementById('syncResults').innerHTML =
+      `<div class="text-red-400">${esc((r && r.error) || 'sync failed')}</div>`;
+    document.getElementById('syncResultsWrap').classList.remove('hidden');
+    btn.disabled = false;
+    btn.textContent = 'Retry';
+    return;
+  }
+
+  const html = r.map(res => {
+    if (res.ok && res.updated) return `<div><span class="text-yellow-400">↻</span> <span class="mono">${esc(res.shardId)}</span> — updated roles</div>`;
+    if (res.ok)      return `<div><span class="text-mg">✓</span> <span class="mono">${esc(res.shardId)}</span> — created</div>`;
+    if (res.skipped) return `<div><span class="text-yellow-400">↷</span> <span class="mono">${esc(res.shardId)}</span> — already exists, skipped</div>`;
+    return `<div><span class="text-red-400">✗</span> <span class="mono">${esc(res.shardId)}</span> — <span class="text-red-300">${esc(res.error || 'failed')}</span></div>`;
+  }).join('');
+  document.getElementById('syncResults').innerHTML = html;
+  document.getElementById('syncResultsWrap').classList.remove('hidden');
+
+  const okCount = r.filter(x => x.ok).length;
+  const failCount = r.filter(x => x.error).length;
+  if (failCount === 0) toast(`Sync complete — ${okCount} shard(s) updated`, 'success');
+  else toast(`Sync finished with ${failCount} error(s) — see modal`, 'error');
+
+  btn.disabled = false;
+  btn.textContent = 'Sync';
+}
   
 // ═══════════════════════════════════════════════════════════ OPLOG STATS
+let _oplogResults = [];          // last fetched cards, indexed for the Analyze button
+let _oaUri = '', _oaSet = '';    // target member + set name for the open analyze modal
+
+// ── formatters (shared with the analyze modal) ───────────────────────────
+function oplogFmtBytes(b){
+  if(b==null||b<=0) return '—';
+  if(b>=1073741824) return (b/1073741824).toFixed(2)+' GB';
+  if(b>=1048576)    return (b/1048576).toFixed(2)+' MB';
+  if(b>=1024)       return (b/1024).toFixed(1)+' KB';
+  return Math.round(b)+' B';
+}
+function oplogFmtHours(h){
+  if(h==null||h<=0||!isFinite(h)) return '—';
+  if(h<1)  return Math.round(h*60)+'m';
+  if(h<48) return h.toFixed(1)+'h';
+  const d=Math.floor(h/24), rem=Math.round(h-d*24);
+  return d+'d'+(rem>0?' '+rem+'h':'');
+}
+function oplogFmtUnix(s){
+  if(!s) return '—';
+  // YYYY-MM-DD HH:MM:SS UTC
+  return new Date(s*1000).toISOString().replace('T',' ').replace(/\.\d+Z$/,'')+' UTC';
+}
+
 async function oplogStats(){
   const rsList = rsNodesList().length > 0 ? rsNodesList() : [{uri}];
   const body = new URLSearchParams({uri});
@@ -2496,34 +3448,82 @@ async function oplogStats(){
   const r = await fetch('/api/db/oplog-stats',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   const results = await r.json();
   if(!Array.isArray(results)) return setMain(errBox((results&&results.error)||'Failed'));
+  _oplogResults = results;
   const fmtB = b => b > 1024 ? (b/1024).toFixed(1)+' GB' : b+' MB';
   const lagCls = s => s < 5 ? 'text-mg' : s < 60 ? 'text-yellow-400' : 'text-red-400';
-  const cards = results.map(rs => {
+  const stat = (label,val,sub='') =>
+    `<div><div class="text-gray-500 text-xs">${label}</div>`+
+    `<div class="mono text-gray-200 font-bold text-sm">${val}</div>`+
+    (sub?`<div class="text-gray-600 text-xs">${sub}</div>`:'')+`</div>`;
+
+  const cards = results.map((rs,idx) => {
     if(rs.error) return `<div class="card"><div class="card-header">⚠️ ${esc(rs.uri)}</div><div class="p-4 text-red-400 text-sm mono">${esc(rs.error)}</div></div>`;
     const usedPct = rs.usedPct || 0;
     const barCol = usedPct < 60 ? '#00ed64' : usedPct < 85 ? '#d29922' : '#f85149';
+
     const memberRows = (rs.members||[]).map(m => `<tr>
       <td class="mono text-xs">${esc(m.host)}</td>
       <td><span class="mb b-${m.state==='PRIMARY'?'PRIMARY':'SECONDARY'}">${esc(m.state)}</span></td>
+      <td class="mono text-xs text-gray-300">${m.optimeTS?oplogFmtUnix(m.optimeTS):'—'}
+        ${m.optimeTS?`<div class="text-gray-600">ts ${m.optimeTS}</div>`:''}</td>
       <td class="mono text-xs ${lagCls(m.lagSecs)}">${m.state==='PRIMARY'?'—':m.lagSecs.toFixed(1)+'s'}</td>
     </tr>`).join('');
-    return `<div class="card">
-      <div class="card-header">🔗 ${esc(rs.setName||rs.uri)}</div>
-      <div class="p-4 grid grid-cols-2 gap-5">
-        <div class="space-y-3">
-          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Oplog Usage</div>
-          <div class="flex items-end gap-3">
-            <div class="text-3xl font-bold ${usedPct>85?'text-red-400':usedPct>60?'text-yellow-400':'text-mg'}">${usedPct.toFixed(1)}%</div>
-            <div class="text-xs text-gray-500 pb-1">${fmtB(rs.usedMB)} / ${fmtB(rs.sizeMB)}</div>
-          </div>
-          <div class="health-track"><div class="health-fill" style="width:${Math.min(100,usedPct)}%;background:${barCol}"></div></div>
-          <div class="text-xs text-gray-500 mt-2">Window: <span class="mono text-gray-300 font-bold">${rs.windowHours?.toFixed(1)||'?'}h</span></div>
+
+    // Coverage timeline (tFirst → tLast)
+    const coverage = (rs.firstTS && rs.lastTS) ? `
+      <div class="flex items-center gap-3 text-xs">
+        <div class="text-right shrink-0" style="min-width:128px">
+          <div class="mono text-gray-300">${oplogFmtUnix(rs.firstTS)}</div>
+          <div class="text-gray-600 uppercase tracking-wider">tFirst</div>
         </div>
+        <div class="flex-1 health-track" style="height:7px"><div class="health-fill" style="width:100%;background:linear-gradient(90deg,#1f6feb,#00ed64)"></div></div>
+        <div class="shrink-0" style="min-width:128px">
+          <div class="mono text-gray-300">${oplogFmtUnix(rs.lastTS)}</div>
+          <div class="text-gray-600 uppercase tracking-wider">tLast</div>
+        </div>
+      </div>
+      <div class="text-center text-xs text-gray-500 mt-1">covers <span class="text-gray-300 font-bold">${oplogFmtHours(rs.windowHours)}</span></div>`
+      : `<div class="text-xs text-gray-600">No oplog entries found.</div>`;
+
+    return `<div class="card">
+      <div class="card-header flex items-center gap-3">
+        <span>🔗 ${esc(rs.setName||rs.uri)}</span>
+        <button onclick="openOplogAnalyze(${idx})" class="btn-xs ml-auto">🔬 Analyze writes…</button>
+      </div>
+      <div class="p-4 space-y-5">
+
+        <div class="grid grid-cols-2 gap-5">
+          <div class="space-y-3">
+            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Oplog Usage</div>
+            <div class="flex items-end gap-3">
+              <div class="text-3xl font-bold ${usedPct>85?'text-red-400':usedPct>60?'text-yellow-400':'text-mg'}">${usedPct.toFixed(1)}%</div>
+              <div class="text-xs text-gray-500 pb-1">${fmtB(rs.usedMB)} / ${fmtB(rs.sizeMB)}</div>
+            </div>
+            <div class="health-track"><div class="health-fill" style="width:${Math.min(100,usedPct)}%;background:${barCol}"></div></div>
+          </div>
+          <div class="space-y-2">
+            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Coverage &amp; Throughput</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+              ${stat('Window', oplogFmtHours(rs.windowHours))}
+              ${stat('Est. retention', oplogFmtHours(rs.estRetHours), 'at capacity')}
+              ${stat('Write rate', rs.writeRateMB>0?rs.writeRateMB.toFixed(1)+' MB/h':'—')}
+              ${stat('Documents', rs.count?rs.count.toLocaleString():'—')}
+              ${stat('Avg entry', oplogFmtBytes(rs.avgObjSize))}
+            </div>
+          </div>
+        </div>
+
         <div>
-          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Replication Lag</div>
-          <table class="dt"><thead><tr><th>Member</th><th>State</th><th>Lag</th></tr></thead>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Oplog Coverage</div>
+          ${coverage}
+        </div>
+
+        <div>
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Replication — Applied OpTime &amp; Lag</div>
+          <table class="dt"><thead><tr><th>Member</th><th>State</th><th>Applied OpTime</th><th>Lag</th></tr></thead>
           <tbody>${memberRows}</tbody></table>
         </div>
+
       </div>
     </div>`;
   }).join('');
@@ -2533,6 +3533,84 @@ async function oplogStats(){
     ${cards}
   </div>`);
 }
+
+// ── Oplog write-volume analysis (per shard / replica set) ─────────────────
+function openOplogAnalyze(idx){
+  const rs = _oplogResults[idx];
+  if(!rs) return;
+  _oaUri = rs.uri;
+  _oaSet = rs.setName || rs.uri;
+  document.getElementById('oaSetName').textContent = _oaSet;
+  // reset to the warning state
+  document.getElementById('oaWarn').classList.remove('hidden');
+  document.getElementById('oaLoading').classList.add('hidden');
+  document.getElementById('oaResults').classList.add('hidden');
+  document.getElementById('oaResults').innerHTML = '';
+  document.getElementById('oplogAnalyzeModal').classList.add('open');
+}
+function closeOplogAnalyze(){
+  document.getElementById('oplogAnalyzeModal').classList.remove('open');
+}
+async function runOplogAnalyze(){
+  const minutes = document.getElementById('oaMinutes').value;
+  const limit   = document.getElementById('oaLimit').value;
+  document.getElementById('oaWarn').classList.add('hidden');
+  document.getElementById('oaResults').classList.add('hidden');
+  document.getElementById('oaLoading').classList.remove('hidden');
+  document.getElementById('oaLoading').classList.add('flex');
+
+  const res = await api('/api/db/oplog-analyze', {uri:_oaUri, minutes, limit});
+
+  document.getElementById('oaLoading').classList.add('hidden');
+  document.getElementById('oaLoading').classList.remove('flex');
+  const out = document.getElementById('oaResults');
+  out.classList.remove('hidden');
+
+  if(!res || res.error){
+    out.innerHTML = errBox(res?.error||'Analysis failed') +
+      `<div class="flex justify-end gap-2 mt-4"><button onclick="backToOplogWarn()" class="btn-sm">‹ Back</button></div>`;
+    return;
+  }
+
+  const cols = Array.isArray(res.collections) ? res.collections : [];
+  const maxMB = cols.reduce((m,c)=>Math.max(m, c.totalMB||0), 0) || 1;
+  const palette = ['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+
+  const rows = cols.map((c,i) => {
+    const col = palette[i%palette.length];
+    const pct = Math.max(2, Math.round((c.totalMB||0)/maxMB*100));
+    return `<tr>
+      <td class="mono text-xs">${esc(c.collection)}</td>
+      <td style="min-width:160px">
+        <div class="flex items-center gap-2">
+          <div class="db-bar-wrap" style="min-width:60px"><div class="db-bar" style="width:${pct}%;background:${col}"></div></div>
+          <span class="mono text-xs text-gray-200 font-bold">${(c.totalMB||0).toFixed(2)} MB</span>
+        </div>
+      </td>
+      <td class="mono text-xs text-gray-300">${(c.operationCount||0).toLocaleString()}</td>
+      <td class="mono text-xs text-gray-400">${(c.avgSizeKB||0).toFixed(2)} KB</td>
+    </tr>`;
+  }).join('');
+
+  const summary = `Window: <span class="text-gray-300 mono">${res.minutes}m</span>
+    &nbsp;·&nbsp; ${oplogFmtUnix(res.from)} → ${oplogFmtUnix(res.to)}
+    &nbsp;·&nbsp; <span class="text-gray-300">${cols.length}</span> collection(s)`;
+
+  out.innerHTML = `
+    <div class="text-xs text-gray-500 mb-3">${summary}</div>
+    ${cols.length===0
+      ? `<div class="text-sm text-gray-500">No write operations (i/u/d/c) in this window.</div>`
+      : `<table class="dt"><thead><tr><th>Collection</th><th>Total write volume</th><th>Operations</th><th>Avg / op</th></tr></thead><tbody>${rows}</tbody></table>`}
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="backToOplogWarn()" class="btn-sm">‹ Back</button>
+      <button onclick="runOplogAnalyze()" class="btn-go">↻ Re-run</button>
+    </div>`;
+}
+function backToOplogWarn(){
+  document.getElementById('oaResults').classList.add('hidden');
+  document.getElementById('oaWarn').classList.remove('hidden');
+}
+
 
 // ═══════════════════════════════════════════════════════════ COLLECTION STATS
 let csSelectedDb='';
@@ -2806,29 +3884,43 @@ let sqSortCol='millis', sqSortDir='desc', sqCurrentList=[];
 async function slowQueries(targetURI){
   if(targetURI) sqTargetURI = targetURI;
   if(!sqTargetURI) {
-    // Profiler data (system.profile) is per-mongod, so default to the first
-    // shard primary in a sharded cluster (or the connected RS in plain RS).
-    const first = rsNodesList()[0]||memberNodes.find(m=>m.role==='primary')||{uri};
-    sqTargetURI = injectCredsIntoUri(first.uri||uri);
+    // Profiler data (system.profile) is per-mongod. Default to the first
+    // available mongod member; never default to a mongos (mongos has no
+    // system.profile and cannot read it from shards on the user's behalf).
+    const mongods = buildMongodInstanceOptions();
+    if(mongods.length>0){
+      sqTargetURI = mongods[0].uri;
+    } else {
+      // Fall back to connected URI only if topology somehow has no mongods
+      // discovered yet — plain RS case where the connected URI IS the data node.
+      sqTargetURI = uri;
+    }
   }
   const domDb = document.getElementById('sqDbSelect')?.value;
   if(domDb) sqSelectedDb = domDb;
 
-  const instanceSel = instanceSelect(sqTargetURI,'setSqURI');
+  const instanceSel = mongodInstanceSelect(sqTargetURI,'setSqURI');
   const minHeaderActions = `<div class="flex gap-2 flex-wrap items-center">${instanceSel}<button onclick="slowQueries()" class="btn-sm">↻</button></div>`;
   // DB list always comes from mongos in a sharded cluster — shards refuse
-  // listDatabases when accessed directly. The selected instance (sqTargetURI)
+  // listDatabases when accessed directly. The selected mongod (sqTargetURI)
   // is still used below for profiler-level / profiler-entries calls.
   const dbListURI = canonicalDataURI();
   const dbsRes = await api('/api/db/stats',{uri:dbListURI});
   if(!Array.isArray(dbsRes)) return setMainWithError('🐢','Slow Queries',minHeaderActions,(dbsRes&&dbsRes.error)||'Failed to load databases',dbListURI);
   const dbOpts = dbsRes.map(d=>`<option value="${esc(d.name)}" ${d.name===sqSelectedDb?'selected':''}>${esc(d.name)}</option>`).join('');
 
-  // Fetch profiling level for selected db
-  let profLevel=0, slowMs=100;
+  // Fetch profiling level for selected db. The `profile` command's "get"
+  // form (`{profile: -1}`) returns the full settings: was/level, slowms,
+  // sampleRate, and any server-side capture filter document.
+  let profLevel=0, slowMs=100, sampleRate=1.0, captureFilter=null;
   if(sqSelectedDb){
     const pl = await api('/api/db/profiler-level',{uri:sqTargetURI,db:sqSelectedDb});
-    if(pl&&!pl.error){ profLevel=pl.was??pl.level??0; slowMs=pl.slowms??100; }
+    if(pl&&!pl.error){
+      profLevel  = pl.was??pl.level??0;
+      slowMs     = pl.slowms??100;
+      if(typeof pl.sampleRate === 'number') sampleRate = pl.sampleRate;
+      if(pl.filter && typeof pl.filter === 'object') captureFilter = pl.filter;
+    }
   }
   const levelCls = [,'text-yellow-400','text-mg'];
   const levelLabel = ['Off','Slow ops only','All ops'];
@@ -2848,16 +3940,29 @@ async function slowQueries(targetURI){
     return;
   }
   // Read filter values BEFORE setLoading() wipes the DOM
-  const nsFilter  = document.getElementById('sqNsFilter')?.value||'';
-  const opFilter2 = document.getElementById('sqOpFilter')?.value||'';
-  const minMs2    = document.getElementById('sqMinMs')?.value||'0';
+  const f = sqReadFilters();
 
   setLoading();
 
-  const entries = await api('/api/db/profiler-entries',{uri:sqTargetURI,db:sqSelectedDb,ns:nsFilter,op:opFilter2,minMs:minMs2,limit:'100'});
+  const entries = await api('/api/db/profiler-entries', {
+    uri:             sqTargetURI,
+    db:              sqSelectedDb,
+    ns:              f.ns,
+    cmdType:         f.cmdType,
+    planSummary:     f.planSummary,
+    user:            f.user,
+    minMs:           f.minMs,
+    minDocsExamined: f.minDocsExamined,
+    minCpuMs:        f.minCpuMs,
+    limit:           '100',
+  });
   const list = Array.isArray(entries) ? entries : [];
 
   sqCurrentList = list;
+  sortSqList(); // keep sqCurrentList in display order so click handlers resolve to the right entry
+
+  // Clear lazy-render cache so re-fetched rows don't show stale JSON trees
+  _sqTreeRendered.clear();
 
   setMain(`<div class="space-y-5">
     ${pageHeader('🐢','Slow Queries',`${sqSelectedDb} · ${list.length} entries`,headerActions)}
@@ -2866,32 +3971,101 @@ async function slowQueries(targetURI){
         <div class="flex items-center gap-3 ml-auto">
           <span class="text-xs ${levelCls[profLevel]||'text-gray-400'}">Level ${profLevel}: ${levelLabel[profLevel]||'Unknown'}</span>
           <span class="text-xs text-gray-500">slowMs: <span class="mono text-gray-300">${slowMs}</span></span>
+          <span class="text-xs text-gray-500">sampleRate: <span class="mono text-gray-300">${sampleRate}</span></span>
+          ${captureFilter
+            ? `<span class="text-xs text-gray-500">filter: <span class="mono text-yellow-400">set</span></span>`
+            : `<span class="text-xs text-gray-500">filter: <span class="mono text-gray-500">none</span></span>`}
         </div>
       </div>
-      <div class="p-4 flex flex-wrap gap-3 items-end">
-        <div><label class="text-xs text-gray-500 block mb-1">Level</label>
-          <select id="profLevelSel" class="fi text-xs">
-            <option value="0" ${profLevel===0?'selected':''}>0 — Off</option>
-            <option value="1" ${profLevel===1?'selected':''}>1 — Slow ops only</option>
-            <option value="2" ${profLevel===2?'selected':''}>2 — All ops</option>
-          </select></div>
-        <div><label class="text-xs text-gray-500 block mb-1">slowMs threshold</label>
-          <input id="profSlowMs" type="number" min="0" value="${slowMs}" class="fi w-24 text-xs"></div>
-        ${VIEW_ONLY?'':`<button onclick="applyProfiler()" class="btn-sm">Apply</button>`}
+      <div class="p-4 space-y-3">
+        <div class="flex flex-wrap gap-3 items-end">
+          <div><label class="text-xs text-gray-500 block mb-1">Level</label>
+            <select id="profLevelSel" onchange="sqUpdateProfWarning()" class="fi text-xs">
+              <option value="0" ${profLevel===0?'selected':''}>0 — Off</option>
+              <option value="1" ${profLevel===1?'selected':''}>1 — Slow ops only (slowms / sampleRate / filter apply)</option>
+              <option value="2" ${profLevel===2?'selected':''}>2 — All ops</option>
+            </select></div>
+          <div><label class="text-xs text-gray-500 block mb-1">slowMs threshold</label>
+            <input id="profSlowMs" type="number" min="0" value="${slowMs}" class="fi w-24 text-xs"></div>
+          <div><label class="text-xs text-gray-500 block mb-1">sampleRate (0.0 – 1.0)</label>
+            <input id="profSampleRate" type="number" min="0" max="1" step="0.05" value="${sampleRate}" class="fi w-24 text-xs"></div>
+        </div>
+
+        <div id="profLevel2Warn" class="${profLevel===2?'':'hidden'} bg-red-900/20 border border-red-800/60 rounded p-3 text-xs">
+          <div class="font-semibold text-red-300 mb-1">⚠️ Level 2 profiles every operation</div>
+          <div class="text-red-300/80 leading-relaxed">
+            At level 2 the profiler ignores user-provided <code class="mono">slowms</code>, <code class="mono">sampleRate</code>, and <code class="mono">filter</code> — every operation is captured to <code class="mono">system.profile</code>.
+            On a busy production system this generates substantial write volume and disk I/O on the local capped collection, can pressure the cache, and noticeably increases per-op latency.
+            Use it briefly for targeted investigation, then return to level 1 or 0.
+          </div>
+        </div>
+
+        <details class="bg-panel-inner border border-panel-border rounded" ${captureFilter?'open':''}>
+          <summary class="cursor-pointer px-3 py-2 text-xs text-gray-300">
+            🎯 <span class="font-semibold">Profile Capture Filter</span>
+            <span class="text-gray-600 ml-2">— server-side filter applied <em>at capture time</em> on the mongod (level 1 only); narrows which ops are written to <code class="mono">system.profile</code> in the first place</span>
+          </summary>
+          <div class="p-3 border-t border-panel-border space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <div><label class="text-xs text-gray-500 block mb-1">Namespace contains</label>
+                <input id="pfNs" placeholder="e.g. orders" value="${esc(_pfFromExisting(captureFilter,'ns'))}" class="fi text-xs w-full"></div>
+              <div><label class="text-xs text-gray-500 block mb-1">Command type</label>
+                <select id="pfCmdType" class="fi text-xs w-full">
+                  <option value="">Any</option>
+                  ${['find','aggregate','count','distinct','findAndModify','update','delete','insert','getMore']
+                    .map(o=>`<option value="${o}" ${_pfFromExisting(captureFilter,'cmdType').toLowerCase()===o.toLowerCase()?'selected':''}>${o}</option>`).join('')}
+                </select></div>
+              <div><label class="text-xs text-gray-500 block mb-1">min docsExamined</label>
+                <input id="pfMinDocs" type="number" min="0" value="${esc(_pfFromExisting(captureFilter,'minDocsExamined'))}" class="fi text-xs w-full"></div>
+              <div><label class="text-xs text-gray-500 block mb-1">planSummary starts with</label>
+                <input id="pfPlanSummary" placeholder="e.g. COLLSCAN, IXSCAN" value="${esc(_pfFromExisting(captureFilter,'planSummary'))}" class="fi text-xs w-full"></div>
+              <div><label class="text-xs text-gray-500 block mb-1">Client IP contains</label>
+                <input id="pfClient" placeholder="e.g. 10.0.0." value="${esc(_pfFromExisting(captureFilter,'client'))}" class="fi text-xs w-full"></div>
+              <div><label class="text-xs text-gray-500 block mb-1">User name contains</label>
+                <input id="pfUser" placeholder="e.g. appuser" value="${esc(_pfFromExisting(captureFilter,'user'))}" class="fi text-xs w-full"></div>
+            </div>
+            <div id="profFilterIgnoredWarn" class="${profLevel===2?'':'hidden'} text-xs text-yellow-400 leading-relaxed">
+              ⚠️ Level 2 ignores this filter — capture happens regardless. Switch to level 1 to make the filter take effect.
+            </div>
+            <div id="profExistingFilterRaw" class="${captureFilter?'':'hidden'}">
+              <div class="text-xs text-gray-500 mb-1">Current server-side filter (read-only):</div>
+              <pre class="text-xs mono text-gray-400 bg-panel rounded p-2 overflow-auto max-h-24 whitespace-pre-wrap">${esc(captureFilter ? JSON.stringify(captureFilter, null, 2) : '')}</pre>
+            </div>
+          </div>
+        </details>
+
+        ${VIEW_ONLY?'':`
+        <div class="flex gap-2">
+          <button onclick="applyProfiler()" class="btn-sm">Apply Settings</button>
+          <button onclick="unsetCaptureFilter()" class="btn-sm" title="Remove the server-side capture filter (sends filter: 'unset')">🗑 Unset Filter</button>
+        </div>`}
       </div>
     </div>
     <div class="card">
-      <div class="card-header">🔍 Filter
-        <div class="flex gap-2 ml-auto flex-wrap">
-          <input id="sqNsFilter" placeholder="namespace contains…" value="${esc(nsFilter)}" class="fi text-xs w-44">
-          <select id="sqOpFilter" class="fi text-xs">
-            <option value="">Any op</option>
-            ${['query','command','getmore','insert','update','remove'].map(o=>`<option value="${o}" ${o===opFilter2?'selected':''}>${o}</option>`).join('')}
-          </select>
-          <div class="flex items-center gap-1"><span class="text-xs text-gray-500">min ms:</span>
-            <input id="sqMinMs" type="number" min="0" value="${esc(minMs2)}" class="fi text-xs w-16"></div>
-          <button onclick="slowQueries()" class="btn-sm">Apply</button>
-        </div>
+      <div class="card-header">🔍 Browse Filter
+        <span class="text-gray-600 font-normal text-xs ml-2">client-side filter — narrows the list displayed below from already-captured entries</span>
+        <button onclick="sqResetFilters()" class="btn-xs ml-auto">Reset</button>
+        <button onclick="slowQueries()" class="btn-sm ml-2">Apply</button>
+      </div>
+      <div class="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        <div><label class="text-xs text-gray-500 block mb-1">Namespace contains</label>
+          <input id="sqNsFilter" placeholder="e.g. users" value="${esc(f.ns)}" class="fi text-xs w-full"></div>
+        <div><label class="text-xs text-gray-500 block mb-1">Command type</label>
+          <select id="sqCmdType" class="fi text-xs w-full">
+            <option value="">Any</option>
+            ${['find','aggregate','count','distinct','findAndModify','update','delete','insert','getMore']
+              .map(o=>`<option value="${o}" ${o.toLowerCase()===f.cmdType.toLowerCase()?'selected':''}>${o}</option>`).join('')}
+          </select></div>
+        <div><label class="text-xs text-gray-500 block mb-1">planSummary starts with</label>
+          <input id="sqPlanSummary" placeholder="e.g. COLLSCAN, IXSCAN" value="${esc(f.planSummary)}" class="fi text-xs w-full"></div>
+        <div><label class="text-xs text-gray-500 block mb-1">User contains</label>
+          <input id="sqUser" placeholder="$impersonatedUser.user" value="${esc(f.user)}" class="fi text-xs w-full"></div>
+        <div><label class="text-xs text-gray-500 block mb-1">min exec time (ms)</label>
+          <input id="sqMinMs" type="number" min="0" value="${esc(f.minMs)}" class="fi text-xs w-full"></div>
+        <div><label class="text-xs text-gray-500 block mb-1">min docs examined</label>
+          <input id="sqMinDocs" type="number" min="0" value="${esc(f.minDocsExamined)}" class="fi text-xs w-full"></div>
+        <div><label class="text-xs text-gray-500 block mb-1">min CPU time (ms)</label>
+          <input id="sqMinCpu" type="number" min="0" value="${esc(f.minCpuMs)}" class="fi text-xs w-full"></div>
       </div>
     </div>
     <div class="card">
@@ -2901,6 +4075,56 @@ async function slowQueries(targetURI){
   </div>`);
 }
 function setSqURI(u){sqTargetURI=u;slowQueries();}
+
+// Read every filter input. Values default to '' or '0' so they round-trip
+// safely back into the DOM after a re-render.
+function sqReadFilters(){
+  return {
+    ns:              document.getElementById('sqNsFilter')?.value     || '',
+    cmdType:         document.getElementById('sqCmdType')?.value      || '',
+    planSummary:     document.getElementById('sqPlanSummary')?.value  || '',
+    user:            document.getElementById('sqUser')?.value         || '',
+    minMs:           document.getElementById('sqMinMs')?.value        || '0',
+    minDocsExamined: document.getElementById('sqMinDocs')?.value      || '0',
+    minCpuMs:        document.getElementById('sqMinCpu')?.value       || '0',
+  };
+}
+function sqResetFilters(){
+  ['sqNsFilter','sqCmdType','sqPlanSummary','sqUser','sqMinMs','sqMinDocs','sqMinCpu']
+    .forEach(id=>{const el=document.getElementById(id); if(el) el.value=(el.type==='number'?'0':'');});
+  slowQueries();
+}
+
+// Sort sqCurrentList in place so row click handlers (which look entries up
+// by index) resolve to the row the user actually sees.
+function sortSqList(){
+  sqCurrentList.sort((a,b)=>{
+    let av = a[sqSortCol], bv = b[sqSortCol];
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    const cmp = (typeof av==='number' && typeof bv==='number')
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return sqSortDir==='desc' ? -cmp : cmp;
+  });
+}
+
+// Tracks which detail rows have already had their JSON tree built, so we
+// can lazy-render trees on first expand instead of paying for 100 trees up
+// front. Cleared on every refetch in slowQueries().
+const _sqTreeRendered = new Set();
+
+function sqToggleDetail(detailId, idx){
+  const el = document.getElementById(detailId);
+  if(!el) return;
+  el.classList.toggle('open');
+  if(el.classList.contains('open') && !_sqTreeRendered.has(detailId)){
+    _sqTreeRendered.add(detailId);
+    const entry = sqCurrentList[idx];
+    if(entry) buildJT(detailId+'-tree', entry, 1);
+  }
+}
 
 function buildSqTable(){
   const secsCls2 = ms => ms<100?'op-fast':ms<1000?'op-mid':'op-slow';
@@ -2920,18 +4144,9 @@ function buildSqTable(){
     `<th class="${thStyle}" onclick="sqSort('${c.key}')">${c.label}${arrow(c.key)}</th>`
   ).join('') + '<th></th>';
 
-  const sorted = [...sqCurrentList].sort((a,b)=>{
-    let av = a[sqSortCol], bv = b[sqSortCol];
-    if(av==null && bv==null) return 0;
-    if(av==null) return 1;
-    if(bv==null) return -1;
-    let cmp = (typeof av==='number' && typeof bv==='number')
-      ? av - bv
-      : String(av).localeCompare(String(bv));
-    return sqSortDir==='desc' ? -cmp : cmp;
-  });
-
-  const rows = sorted.map((e,i)=>{
+  // sqCurrentList is already in display order (sorted by sortSqList()) so
+  // row index i resolves to sqCurrentList[i] for click handlers.
+  const rows = sqCurrentList.map((e,i)=>{
     const id  = 'sq-'+i;
     const ns  = e.ns||'';
     const op  = e.op||'';
@@ -2941,7 +4156,6 @@ function buildSqTable(){
     const keysExam = e.keysExamined??'--';
     const docsExam = e.docsExamined??'--';
     const docsRet  = e.nreturned??'--';
-    const cmd = JSON.stringify(e.command||e.query||{},null,2);
     // Decide whether this entry is meaningfully explainable. MongoDB's explain
     // accepts find / aggregate / count / distinct / findAndModify / update /
     // delete / mapReduce. We also accept the legacy op="query" form which the
@@ -2953,9 +4167,9 @@ function buildSqTable(){
     const isExpl = opLower==='query' || opLower==='update' || opLower==='remove' ||
                    cmdKeysLower.some(k=>explainableCmds.includes(k));
     const explainBtn = isExpl
-      ? `<button onclick="event.stopPropagation();runExplain(${i})" class="btn-xs" title="Run explain on this command">🔬 Explain</button>`
+      ? `<button onclick="event.stopPropagation();runExplain(${i})" class="btn-xs" title="Run explain on this command (via mongos)">🔬 Explain</button>`
       : '';
-    return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="toggleDetail('${id}')">
+    return `<tr class="cursor-pointer hover:bg-panel-hover" onclick="sqToggleDetail('${id}',${i})">
       <td class="mono text-xs text-gray-500">${esc(ts.slice(0,19).replace('T',' '))}</td>
       <td><span class="mb b-SECONDARY text-xs">${esc(op)}</span></td>
       <td class="mono text-xs">${esc(ns)}</td>
@@ -2967,8 +4181,16 @@ function buildSqTable(){
       <td class="text-gray-600 text-xs whitespace-nowrap">${explainBtn}<span class="ml-2">▼</span></td>
     </tr>
     <tr id="${id}" class="op-detail"><td colspan="9" class="p-0 bg-panel-inner">
-      <div class="p-4"><div class="text-xs font-bold text-gray-500 uppercase mb-2">Command</div>
-        <pre class="text-xs mono text-gray-300 bg-panel rounded p-3 overflow-auto max-h-52 whitespace-pre-wrap">${esc(cmd)}</pre>
+      <div class="p-4">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
+          <div class="text-xs font-bold text-gray-500 uppercase">Full profile entry</div>
+          <code class="text-gray-600 text-xs mono">db.system.profile.findOne(...)</code>
+          <div class="ml-auto flex gap-2">
+            <button onclick="event.stopPropagation();jtExpandAll('${id}-tree')"   class="btn-xs">Expand All</button>
+            <button onclick="event.stopPropagation();jtCollapseAll('${id}-tree')" class="btn-xs">Collapse All</button>
+          </div>
+        </div>
+        <div id="${id}-tree" class="bg-panel rounded p-3 mono text-xs leading-6 max-h-[480px] overflow-y-auto"></div>
       </div>
     </td></tr>`;
   }).join('');
@@ -2982,16 +4204,165 @@ function buildSqTable(){
 function sqSort(col){
   if(sqSortCol===col) sqSortDir = sqSortDir==='desc'?'asc':'desc';
   else { sqSortCol=col; sqSortDir='desc'; }
+  sortSqList();
+  // Sort changes which entry sits at each row index — invalidate the lazy-
+  // render cache so we don't show the previous row's JSON tree.
+  _sqTreeRendered.clear();
   const wrap = document.getElementById('sqTableWrap');
   if(wrap) wrap.innerHTML = buildSqTable();
 }
 async function applyProfiler(){
-  const level = document.getElementById('profLevelSel')?.value;
-  const slowMs = document.getElementById('profSlowMs')?.value;
-  const r = await api('/api/db/profiler-level-set',{uri:sqTargetURI,db:sqSelectedDb,level,slowMs});
+  const level    = document.getElementById('profLevelSel')?.value;
+  const slowMs   = document.getElementById('profSlowMs')?.value;
+  const sampleR  = document.getElementById('profSampleRate')?.value;
+  // Build the capture filter document from the structured inputs. If every
+  // field is empty, we send no filter at all so the server keeps whatever
+  // filter (if any) it already has — use the explicit "Unset Filter" button
+  // to remove an existing server-side filter.
+  const captureFilter = buildProfilerCaptureFilter();
+  const params = {uri:sqTargetURI, db:sqSelectedDb, level, slowMs};
+  if (sampleR !== '' && sampleR !== undefined) params.sampleRate = sampleR;
+  if (captureFilter !== null) params.filter = JSON.stringify(captureFilter);
+
+  const r = await api('/api/db/profiler-level-set', params);
   if(r&&r.error) return toast(r.error,'error');
-  toast(`Profiler set to level ${level}, slowMs=${slowMs}`,'success');
+  const bits = [`level ${level}`, `slowMs ${slowMs}`];
+  if (sampleR !== '' && sampleR !== undefined) bits.push(`sampleRate ${sampleR}`);
+  if (captureFilter !== null) bits.push('capture filter applied');
+  toast(`Profiler updated: ${bits.join(', ')}`,'success');
   setTimeout(()=>slowQueries(),600);
+}
+
+async function unsetCaptureFilter(){
+  if(!confirm('Remove the server-side capture filter on '+sqSelectedDb+'? Profiling level and slowms are kept.')) return;
+  const level  = document.getElementById('profLevelSel')?.value || '1';
+  const slowMs = document.getElementById('profSlowMs')?.value   || '100';
+  // Per the v7 docs: db.setProfilingLevel(1, {filter: "unset"}) clears the filter.
+  const r = await api('/api/db/profiler-level-set', {
+    uri:sqTargetURI, db:sqSelectedDb, level, slowMs, filter:'unset',
+  });
+  if(r&&r.error) return toast(r.error,'error');
+  toast('Capture filter unset','success');
+  setTimeout(()=>slowQueries(),600);
+}
+
+// Show/hide the level-2 warnings as the dropdown changes — local, no roundtrip.
+function sqUpdateProfWarning(){
+  const lvl = parseInt(document.getElementById('profLevelSel')?.value || '0');
+  const lvl2Box = document.getElementById('profLevel2Warn');
+  const ignBox  = document.getElementById('profFilterIgnoredWarn');
+  if(lvl2Box) lvl2Box.classList.toggle('hidden', lvl !== 2);
+  if(ignBox)  ignBox .classList.toggle('hidden', lvl !== 2);
+}
+
+// Build a MongoDB filter document from the structured inputs. Returns null
+// when nothing is filled in (so we send no filter and the server's existing
+// one stays put). Multiple fields are combined with implicit AND (object
+// keys); user matching uses $or across the several places where the user
+// can show up in a profile entry.
+function buildProfilerCaptureFilter(){
+  const ns       = document.getElementById('pfNs')?.value.trim()          || '';
+  const cmdType  = document.getElementById('pfCmdType')?.value.trim()     || '';
+  const minDocs  = document.getElementById('pfMinDocs')?.value.trim()     || '';
+  const planSum  = document.getElementById('pfPlanSummary')?.value.trim() || '';
+  const client   = document.getElementById('pfClient')?.value.trim()      || '';
+  const user     = document.getElementById('pfUser')?.value.trim()        || '';
+
+  const f = {};
+  let touched = false;
+
+  if (ns) { f.ns = {$regex: ns}; touched = true; }
+  if (planSum) { f.planSummary = {$regex: '^' + _regexEscape(planSum), $options: 'i'}; touched = true; }
+  if (minDocs && parseInt(minDocs) > 0) { f.docsExamined = {$gte: parseInt(minDocs)}; touched = true; }
+  if (client) { f.client = {$regex: _regexEscape(client)}; touched = true; }
+
+  if (cmdType) {
+    const orCmd = _cmdTypeOrClauses(cmdType);
+    if (orCmd.length === 1) { Object.assign(f, orCmd[0]); touched = true; }
+    else if (orCmd.length > 1) { f.$or = orCmd; touched = true; }
+  }
+  if (user) {
+    const rx = {$regex: _regexEscape(user), $options: 'i'};
+    const userOr = [
+      {'command.$audit.$impersonatedUser.user': rx},
+      {'effectiveUsers.user': rx},
+      {'user': rx},
+    ];
+    if (f.$or) {
+      // Combine the cmdType $or and user $or under $and so neither is lost.
+      f.$and = [{$or: f.$or}, {$or: userOr}];
+      delete f.$or;
+    } else {
+      f.$or = userOr;
+    }
+    touched = true;
+  }
+
+  return touched ? f : null;
+}
+
+function _cmdTypeOrClauses(ct){
+  switch(ct.toLowerCase()){
+    case 'find':          return [{op:'query'}, {'command.find':{$exists:true}}];
+    case 'aggregate':     return [{'command.aggregate':{$exists:true}}];
+    case 'count':         return [{'command.count':{$exists:true}}];
+    case 'distinct':      return [{'command.distinct':{$exists:true}}];
+    case 'findandmodify': return [{'command.findAndModify':{$exists:true}}, {'command.findandmodify':{$exists:true}}];
+    case 'update':        return [{op:'update'}, {'command.update':{$exists:true}}];
+    case 'delete': case 'remove': return [{op:'remove'}, {'command.delete':{$exists:true}}];
+    case 'insert':        return [{op:'insert'}, {'command.insert':{$exists:true}}];
+    case 'getmore':       return [{op:'getmore'}, {'command.getMore':{$exists:true}}];
+  }
+  return [];
+}
+
+function _regexEscape(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Best-effort: pull a starting value for a structured input out of an
+// already-stored server-side filter so the UI shows the user what's there.
+// We don't try to round-trip every possible filter — just the common simple
+// shapes we ourselves emit.
+function _pfFromExisting(filter, kind){
+  if (!filter || typeof filter !== 'object') return '';
+  const f = filter;
+  switch(kind){
+    case 'ns':
+      if (f.ns && typeof f.ns === 'object' && typeof f.ns.$regex === 'string') return f.ns.$regex;
+      if (typeof f.ns === 'string') return f.ns;
+      return '';
+    case 'planSummary':
+      if (f.planSummary && typeof f.planSummary === 'object' && typeof f.planSummary.$regex === 'string') {
+        return f.planSummary.$regex.replace(/^\^/, '');
+      }
+      return '';
+    case 'minDocsExamined':
+      if (f.docsExamined && typeof f.docsExamined === 'object' && typeof f.docsExamined.$gte === 'number') return String(f.docsExamined.$gte);
+      return '';
+    case 'client':
+      if (f.client && typeof f.client === 'object' && typeof f.client.$regex === 'string') return f.client.$regex;
+      if (typeof f.client === 'string') return f.client;
+      return '';
+    case 'user':
+      // Heuristic: any of the user-or clauses' regex.
+      const arr = f.$or || (Array.isArray(f.$and) ? f.$and.flatMap(c => c.$or || []) : []);
+      for (const c of arr) {
+        for (const k of ['command.$audit.$impersonatedUser.user', 'effectiveUsers.user', 'user']) {
+          if (c[k] && typeof c[k] === 'object' && typeof c[k].$regex === 'string') return c[k].$regex;
+        }
+      }
+      return '';
+    case 'cmdType':
+      // Look for "command.<name>" $exists clauses anywhere.
+      const all = [f, ...(f.$or || []), ...(Array.isArray(f.$and) ? f.$and.flatMap(c => [c, ...(c.$or || [])]) : [])];
+      for (const c of all) {
+        for (const k of Object.keys(c)) {
+          const m = k.match(/^command\.(.+)$/);
+          if (m && c[k] && c[k].$exists) return m[1];
+        }
+      }
+      return '';
+  }
+  return '';
 }
 
 // ─── Explain: run MongoDB explain on a profile entry's command ───
@@ -3010,8 +4381,11 @@ async function runExplain(rowIdx) {
   document.getElementById('explainCommand').textContent =
     JSON.stringify(entry.command || entry.query || {}, null, 2);
   document.getElementById('explainSummary').innerHTML = '';
-  document.getElementById('explainTree').innerHTML = '';
+  document.getElementById('explainTree').innerHTML   = '';
+  document.getElementById('explainViz').innerHTML    = '';
   document.getElementById('explainError').classList.add('hidden');
+  // Reset to the Visualization tab on each open (most useful default).
+  setExplainView('viz');
 
   await executeExplain();
 }
@@ -3026,14 +4400,23 @@ async function executeExplain() {
   const cmd = entry.command || entry.query || {};
 
   const treeEl = document.getElementById('explainTree');
+  const vizEl  = document.getElementById('explainViz');
   const summaryEl = document.getElementById('explainSummary');
   const errEl = document.getElementById('explainError');
   errEl.classList.add('hidden');
   summaryEl.innerHTML = '';
-  treeEl.innerHTML = '<div class="text-gray-500 text-xs flex items-center gap-2 p-3"><span class="spinner"></span>Running explain…</div>';
+  const spinner = '<div class="text-gray-500 text-xs flex items-center gap-2 p-3"><span class="spinner"></span>Running explain…</div>';
+  treeEl.innerHTML = spinner;
+  vizEl.innerHTML  = spinner;
+
+  // Explain always goes through mongos in a sharded cluster — direct shard
+  // connections refuse listDatabases / explain-of-cluster-wide-aggregates
+  // with "(Unauthorized) improperly connected to a sharded cluster". In a
+  // plain RS the connected URI is the RS itself and works directly.
+  const explainURI = canonicalDataURI();
 
   const r = await api('/api/db/explain', {
-    uri: sqTargetURI,
+    uri: explainURI,
     db: db,
     ns: ns,
     op: entry.op || '',
@@ -3043,6 +4426,7 @@ async function executeExplain() {
 
   if (!r || r.error) {
     treeEl.innerHTML = '';
+    vizEl.innerHTML  = '';
     errEl.textContent = (r && r.error) ? r.error : 'No response';
     errEl.classList.remove('hidden');
     return;
@@ -3051,6 +4435,278 @@ async function executeExplain() {
   summaryEl.innerHTML = buildExplainSummary(r);
   treeEl.innerHTML = '';
   buildJT('explainTree', r, 3);
+
+  // Build the visualization view from the same result. We don't switch tabs
+  // here — runExplain() picks the initial tab so verbosity re-runs preserve
+  // whichever tab the user is currently looking at.
+  const viz = extractExplainViz(r);
+  vizEl.innerHTML = renderExplainViz(viz);
+}
+
+// ─── Explain output: tab switching ───
+function setExplainView(view) {
+  const isTree = view === 'tree';
+  document.getElementById('explainTreeWrap').classList.toggle('hidden', !isTree);
+  document.getElementById('explainVizWrap').classList.toggle('hidden',  isTree);
+  document.getElementById('exTreeControls').classList.toggle('hidden', !isTree);
+
+  const tabTree = document.getElementById('exTabTree');
+  const tabViz  = document.getElementById('exTabViz');
+  // Active tab is highlighted by background + accent color; inactive is muted.
+  tabTree.classList.toggle('bg-panel-inner',  isTree);
+  tabTree.classList.toggle('text-mg',          isTree);
+  tabTree.classList.toggle('text-gray-500',   !isTree);
+  tabViz .classList.toggle('bg-panel-inner', !isTree);
+  tabViz .classList.toggle('text-mg',         !isTree);
+  tabViz .classList.toggle('text-gray-500',    isTree);
+}
+
+// ─── Explain visualization: extract per-shard execution flow ───
+// MongoDB returns explain results in several shapes depending on operation
+// type (find vs aggregate), version, and topology (sharded vs RS). This
+// extractor flattens them into a single structure the renderer can consume.
+function extractExplainViz(res) {
+  if (!res || typeof res !== 'object') return null;
+
+  const out = {
+    type: 'unknown',
+    shards: [],
+    splitPipeline: null, // {shardsPart: ['$match', ...], mergerPart: ['$sort', ...]}
+    mergeType: '',
+  };
+
+  // Case A: sharded aggregate — top-level `shards` object keyed by shard name,
+  // each value carrying its own `stages` array and/or `queryPlanner`.
+  if (res.shards && typeof res.shards === 'object' && !Array.isArray(res.shards)) {
+    const names = Object.keys(res.shards);
+    if (names.length > 0) {
+      out.type = 'sharded-aggregate';
+      for (const name of names) {
+        out.shards.push(buildShardViz(name, res.shards[name]));
+      }
+      if (res.splitPipeline && typeof res.splitPipeline === 'object') {
+        out.splitPipeline = {
+          shardsPart: (res.splitPipeline.shardsPart || []).map(stagePipelineName).filter(Boolean),
+          mergerPart: (res.splitPipeline.mergerPart || []).map(stagePipelineName).filter(Boolean),
+        };
+      }
+      if (res.mergeType) out.mergeType = String(res.mergeType);
+      return out;
+    }
+  }
+
+  // Case B: sharded find — queryPlanner.winningPlan.shards is an *array*.
+  const fwShards = res.queryPlanner?.winningPlan?.shards;
+  if (Array.isArray(fwShards)) {
+    out.type = 'sharded-find';
+    for (const sd of fwShards) {
+      out.shards.push(buildShardViz(sd.shardName || sd.shard || 'shard', sd));
+    }
+    return out;
+  }
+
+  // Case C: non-sharded (RS or stand-alone). Either queryPlanner (find) or
+  // a bare stages array (aggregate) at the top level.
+  if (res.queryPlanner || Array.isArray(res.stages)) {
+    out.type = 'single';
+    out.shards.push(buildShardViz('', res));
+    return out;
+  }
+
+  return out;
+}
+
+function stagePipelineName(s) {
+  if (!s || typeof s !== 'object') return '';
+  const k = Object.keys(s);
+  return k.length ? k[0] : '';
+}
+
+function buildShardViz(name, sd) {
+  if (!sd) sd = {};
+  const shard = {
+    name,
+    host: sd.host || sd.connectionString || '',
+    stages: [],
+    executionMs:   sd.executionStats?.executionTimeMillis,
+    nReturned:     sd.executionStats?.nReturned,
+    docsExamined:  sd.executionStats?.totalDocsExamined,
+    keysExamined:  sd.executionStats?.totalKeysExamined,
+  };
+
+  // Aggregate-style: array of pipeline stages, sometimes with $cursor wrapping
+  // the underlying query plan.
+  if (Array.isArray(sd.stages)) {
+    for (const st of sd.stages) {
+      const k = Object.keys(st)[0];
+      if (!k) continue;
+      if (k === '$cursor') {
+        const cur = st.$cursor || {};
+        const wp  = cur.queryPlanner?.winningPlan;
+        if (wp) shard.stages.push(...walkPlanForViz(wp));
+        // Prefer per-cursor execution stats over absent top-level ones.
+        const es = cur.executionStats || {};
+        if (shard.executionMs   === undefined && es.executionTimeMillis !== undefined) shard.executionMs   = es.executionTimeMillis;
+        if (shard.docsExamined  === undefined && es.totalDocsExamined   !== undefined) shard.docsExamined  = es.totalDocsExamined;
+        if (shard.keysExamined  === undefined && es.totalKeysExamined   !== undefined) shard.keysExamined  = es.totalKeysExamined;
+        if (shard.nReturned     === undefined && es.nReturned           !== undefined) shard.nReturned     = es.nReturned;
+      } else {
+        shard.stages.push({name: k, kind: 'pipeline'});
+      }
+    }
+  }
+
+  // Find-style: queryPlanner.winningPlan directly on the shard object.
+  if (sd.queryPlanner?.winningPlan) {
+    shard.stages.push(...walkPlanForViz(sd.queryPlanner.winningPlan));
+  } else if (sd.winningPlan) {
+    shard.stages.push(...walkPlanForViz(sd.winningPlan));
+  }
+
+  return shard;
+}
+
+// Post-order walk: deepest stage first, terminal stage last — matches the
+// actual execution order so the renderer can draw arrows downward and have
+// the data-source stage (IXSCAN/COLLSCAN) at the top.
+function walkPlanForViz(plan) {
+  const out = [];
+  function walk(s) {
+    if (!s || typeof s !== 'object') return;
+    if (s.inputStage) walk(s.inputStage);
+    if (Array.isArray(s.inputStages)) s.inputStages.forEach(walk);
+    out.push(stageInfo(s));
+  }
+  walk(plan);
+  return out;
+}
+
+function stageInfo(s) {
+  const info = {name: s.stage || 'UNKNOWN', kind: 'plan'};
+  if (s.indexName)   info.indexName   = s.indexName;
+  if (s.keyPattern)  info.keyPattern  = s.keyPattern;
+  if (s.direction)   info.direction   = s.direction;
+  if (s.sortPattern) info.sortPattern = s.sortPattern;
+  if (s.isMultiKey !== undefined) info.isMultiKey = s.isMultiKey;
+  if (s.indexBounds) info.indexBounds = s.indexBounds;
+  if (s.limitAmount !== undefined) info.limitAmount = s.limitAmount;
+  if (s.skipAmount  !== undefined) info.skipAmount  = s.skipAmount;
+  return info;
+}
+
+function stageBadge(name) {
+  const n = (name || '').toUpperCase();
+  if (n === 'COLLSCAN') return 'b-DOWN';
+  if (n === 'IXSCAN' || n === 'IDHACK' || n === 'DISTINCT_SCAN' || n === 'COUNT_SCAN') return 'b-PRIMARY';
+  if (n === 'SORT' || n === 'SORT_KEY_GENERATOR' || n === 'SORT_MERGE') return 'b-ARBITER';
+  if (n.startsWith('$')) return 'b-mongos'; // pipeline operator
+  return 'b-SECONDARY';
+}
+
+function renderExplainViz(viz) {
+  if (!viz || viz.shards.length === 0) {
+    return `<div class="text-gray-500 text-xs">
+      No structured plan to visualize. The explain result didn't contain a
+      recognizable shards / queryPlanner / stages layout — switch to the JSON
+      Tree tab to inspect the raw output.
+    </div>`;
+  }
+
+  // Per-shard cards
+  const isSharded = viz.type === 'sharded-aggregate' || viz.type === 'sharded-find';
+  const gridCols  = viz.shards.length > 1 ? 'lg:grid-cols-2 xl:grid-cols-3' : '';
+  const shardCards = viz.shards.map(s => renderShardCard(s, isSharded)).join('');
+
+  // Merger pipeline (only present for sharded aggregates with split pipeline)
+  let mergerSection = '';
+  if (viz.splitPipeline && viz.splitPipeline.mergerPart.length > 0) {
+    const mergerStages = viz.splitPipeline.mergerPart.map((nm, i, arr) => `
+      <div class="flex items-center gap-2">
+        <span class="mb b-mongos text-xs mono">${esc(nm)}</span>
+      </div>
+      ${i < arr.length-1 ? '<div class="text-gray-600 my-1 ml-2">↓</div>' : ''}
+    `).join('');
+    mergerSection = `
+      <div class="card">
+        <div class="card-header text-sm">🔀 Merger pipeline
+          ${viz.mergeType ? `<span class="mb b-HIDDEN text-xs ml-2">${esc(viz.mergeType)}</span>` : ''}
+          <code class="mono text-gray-600 text-xs ml-2">splitPipeline.mergerPart</code>
+        </div>
+        <div class="p-3 space-y-0.5">${mergerStages}</div>
+      </div>`;
+  }
+
+  // Top legend so the colors make sense at a glance
+  const legend = `
+    <div class="flex flex-wrap gap-3 text-xs items-center mb-1">
+      <span class="text-gray-500">Legend:</span>
+      <span class="mb b-PRIMARY">IXSCAN</span><span class="text-gray-600">index used</span>
+      <span class="mb b-DOWN">COLLSCAN</span><span class="text-gray-600">full scan</span>
+      <span class="mb b-ARBITER">SORT</span><span class="text-gray-600">in-memory sort</span>
+      <span class="mb b-SECONDARY">FETCH</span><span class="text-gray-600">plan stage</span>
+      <span class="mb b-mongos">$stage</span><span class="text-gray-600">pipeline operator</span>
+    </div>`;
+
+  return `<div class="space-y-3">
+    ${legend}
+    <div class="grid grid-cols-1 ${gridCols} gap-3">${shardCards}</div>
+    ${mergerSection}
+  </div>`;
+}
+
+function renderShardCard(s, isSharded) {
+  // Each stage line: [badge stageName] indented detail line if relevant
+  const stagesHtml = s.stages.length === 0
+    ? '<div class="text-gray-500 text-xs">no stages</div>'
+    : s.stages.map((st, i, arr) => {
+        const badge = stageBadge(st.name);
+        let detail  = '';
+        if (st.indexName) {
+          const kp = st.keyPattern ? JSON.stringify(st.keyPattern) : '';
+          const mk = st.isMultiKey ? ' <span class="mb b-ARBITER text-xs">multikey</span>' : '';
+          detail = `<div class="ml-1 mt-1 text-xs flex flex-wrap gap-x-3 gap-y-1">
+            <span><span class="text-gray-600">index:</span> <code class="mono text-mg">${esc(st.indexName)}</code></span>
+            ${kp ? `<span><span class="text-gray-600">keyPattern:</span> <code class="mono text-gray-300">${esc(kp)}</code></span>` : ''}
+            ${mk}
+            ${st.direction ? `<span class="text-gray-600">dir: <code class="mono text-gray-400">${esc(st.direction)}</code></span>` : ''}
+          </div>`;
+        } else if (st.sortPattern) {
+          detail = `<div class="ml-1 mt-1 text-xs">
+            <span class="text-gray-600">sort:</span> <code class="mono text-gray-300">${esc(JSON.stringify(st.sortPattern))}</code>
+          </div>`;
+        } else if (st.name === 'COLLSCAN' && st.direction) {
+          detail = `<div class="ml-1 mt-1 text-xs text-gray-500">direction: ${esc(st.direction)}</div>`;
+        } else if (st.limitAmount !== undefined) {
+          detail = `<div class="ml-1 mt-1 text-xs text-gray-500">limit: ${st.limitAmount}</div>`;
+        } else if (st.skipAmount !== undefined) {
+          detail = `<div class="ml-1 mt-1 text-xs text-gray-500">skip: ${st.skipAmount}</div>`;
+        }
+        const arrow = i < arr.length - 1 ? '<div class="text-gray-700 my-1 ml-2 text-sm">↓</div>' : '';
+        return `<div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mb ${badge} text-xs mono">${esc(st.name)}</span>
+          </div>
+          ${detail}
+          ${arrow}
+        </div>`;
+      }).join('');
+
+  const stats = [];
+  if (s.executionMs   !== undefined) stats.push(`<span class="mono"><span class="text-gray-600">time:</span> ${s.executionMs}ms</span>`);
+  if (s.nReturned     !== undefined) stats.push(`<span class="mono"><span class="text-gray-600">returned:</span> ${s.nReturned}</span>`);
+  if (s.docsExamined  !== undefined) stats.push(`<span class="mono"><span class="text-gray-600">docs:</span> ${s.docsExamined}</span>`);
+  if (s.keysExamined  !== undefined) stats.push(`<span class="mono"><span class="text-gray-600">keys:</span> ${s.keysExamined}</span>`);
+
+  const header = isSharded
+    ? `📦 <code class="mono text-mg ml-1">${esc(s.name)}</code>${s.host ? ` <code class="text-gray-600 mono text-xs ml-2">${esc(s.host)}</code>` : ''}`
+    : `📦 Local execution${s.host ? ` <code class="text-gray-600 mono text-xs ml-2">${esc(s.host)}</code>` : ''}`;
+
+  return `<div class="card">
+    <div class="card-header text-sm flex-wrap">${header}
+      <div class="ml-auto flex gap-3 text-xs text-gray-300">${stats.join('')}</div>
+    </div>
+    <div class="p-3">${stagesHtml}</div>
+  </div>`;
 }
 
 // Extract a flat list of stages from the winning plan tree.
@@ -3159,20 +4815,26 @@ function closeExplainModal() {
 }
 
 // ═══════════════════════════════════════════════════════════ LOG VIEWER
-let lgTargetURI='', lgFilter='', lgLevel='';
+let lgTargetURI='', lgFilter='', lgLevel='', lgShow=500;
 async function logViewer(targetURI){
   if(targetURI) lgTargetURI = targetURI;
   if(!lgTargetURI) lgTargetURI = uri;
   const instanceSel = instanceSelect(lgTargetURI,'setLgURI');
   const domFilter = document.getElementById('lgFilter')?.value??'';
   const domLevel  = document.getElementById('lgLevel')?.value??'';
+  const domShow   = document.getElementById('lgShow')?.value;
   if(domFilter!==undefined) lgFilter = domFilter;
   if(domLevel!==undefined)  lgLevel  = domLevel;
+  if(domShow!==undefined && domShow!==null) lgShow = parseInt(domShow,10);
+  const showOpts = [['100','Last 100'],['250','Last 250'],['500','Last 500'],['1000','Last 1000'],['0','All buffered']];
   const headerActions=`<div class="flex gap-2 flex-wrap items-center">
     ${instanceSel}
     <select id="lgLevel" onchange="logViewer()" class="fi text-xs">
       <option value="">All severities</option>
       ${['I','W','E','F'].map(s=>`<option value="${s}" ${s===lgLevel?'selected':''}>${s}</option>`).join('')}
+    </select>
+    <select id="lgShow" onchange="logViewer()" class="fi text-xs" title="How many of the buffered lines to render (newest first)">
+      ${showOpts.map(([v,t])=>`<option value="${v}" ${String(lgShow)===v?'selected':''}>${t}</option>`).join('')}
     </select>
     <input id="lgFilter" placeholder="Filter…" value="${esc(lgFilter)}" class="fi text-xs w-40" onchange="logViewer()">
     <button onclick="logViewer()" class="btn-sm">↻</button>
@@ -3204,8 +4866,11 @@ async function logViewer(targetURI){
     return true;
   });
 
-  // Store display-ordered lines for lgToggle access (newest first, capped at 500)
-  _lgParsed = filtered.slice(-500).reverse();
+  // Range selection. getLog returns the whole in-memory RAM cache in one shot
+  // (there is no server-side skip/limit), so "show" is a client-side slice of
+  // the newest N matching lines. lgShow===0 means render everything matched.
+  const showN = (lgShow && lgShow>0) ? lgShow : filtered.length;
+  _lgParsed = filtered.slice(-showN).reverse();
 
   const rows = _lgParsed.map((l, rowIdx) => {
     const cls = sevCls[l.s]||'text-gray-500';
@@ -3228,18 +4893,28 @@ async function logViewer(targetURI){
 
   const warnCount = parsed.filter(l=>l.s==='W').length;
   const errCount  = parsed.filter(l=>l.s==='E'||l.s==='F').length;
+  const isFiltered = !!(lgLevel || lgFilter);
+  const shownNote = (lgShow && lgShow>0)
+    ? `newest first · last ${_lgParsed.length} of ${filtered.length}${isFiltered?' matched':''}`
+    : `newest first · all ${_lgParsed.length}${isFiltered?' matched':''}`;
 
   setMain(`<div class="space-y-5">
-    ${pageHeader('📜','Log Viewer',`${total} lines · ${filtered.length} shown`, headerActions)}
+    ${pageHeader('📜','Log Viewer',`${total} buffered · ${_lgParsed.length} shown`, headerActions)}
+    <div class="text-xs text-gray-500 -mt-2 leading-relaxed">
+      ℹ️ <span class="mono text-gray-400">getLog</span> returns MongoDB's in-memory log cache — at most the
+      <span class="text-gray-300">1024</span> most recent events, not the full history. This is a tail, not a count of
+      everything that exists; lines that have rotated out of memory live only in the on-disk log file, which MongoAdmin
+      (being agentless) doesn't read. The selector above slices these buffered lines client-side.
+    </div>
     <div class="grid grid-cols-4 gap-3">
-      ${statCard('Total Lines',total,'','')}
+      ${statCard('Buffered Lines',total,'getLog cap: 1024','')}
       ${statCard('Warnings',warnCount,'',warnCount>0?'text-yellow-400':'text-mg')}
       ${statCard('Errors',errCount,'',errCount>0?'text-red-400':'text-mg')}
-      ${statCard('Shown',filtered.length,'','')}
+      ${statCard('Shown',_lgParsed.length,isFiltered?`of ${filtered.length} matched`:'','')}
     </div>
     <div class="card">
       <div class="card-header">📜 Log Lines
-        <span class="text-gray-600 font-normal text-xs ml-1">newest first · last 500 of filtered</span>
+        <span class="text-gray-600 font-normal text-xs ml-1">${shownNote}</span>
         <span class="text-gray-600 font-normal text-xs ml-3">· click any row to expand</span>
       </div>
       <div class="overflow-x-auto max-h-[640px] overflow-y-auto">
@@ -3307,10 +4982,24 @@ function lgToggle(tr, idx) {
     'line-height:1.7',
   ].join(';');
 
-  // Render using the existing interactive JSON tree.
+  // ── Toolbar: Expand All / Collapse All for this entry's JSON tree ──────────────
+  const treeId = 'lg-tree-' + idx;
+  const toolbar = document.createElement('div');
+  toolbar.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+  toolbar.innerHTML =
+    `<button class="btn-xs" onclick="event.stopPropagation();jtExpandAll('${treeId}')">Expand All</button>`+
+    `<button class="btn-xs" onclick="event.stopPropagation();jtCollapseAll('${treeId}')">Collapse All</button>`;
+
+  // Render using the existing interactive JSON tree, inside an id'd container so
+  // Expand/Collapse All target only this entry.
   // depth=2 means top-level keys and `attr` are expanded by default;
   // deeper nesting starts collapsed (click to expand — standard jq UX).
-  pane.appendChild(jtNode(obj, null, 0, 2));
+  const treeWrap = document.createElement('div');
+  treeWrap.id = treeId;
+  treeWrap.appendChild(jtNode(obj, null, 0, 2));
+
+  pane.appendChild(toolbar);
+  pane.appendChild(treeWrap);
 
   td.appendChild(pane);
   detailTr.appendChild(td);
@@ -3322,6 +5011,144 @@ function lgToggle(tr, idx) {
   if (chev) chev.style.transform = 'rotate(90deg)';
 }
 function setLgURI(u){lgTargetURI=u;logViewer();}
+
+// ═══════════════════════════════════════════════════════════ SECURITY STATUS
+// Builds the list of nodes to inspect. Works across topologies:
+//  · sharded     → every individual shard/config mongod (memberNodes) + mongos routers
+//  · replica set → every individual mongod member
+//  · standalone  → the single connection URI
+function securityTargets(){
+  const t=[];
+  if(topology.type==='sharded'){
+    (memberNodes||[]).forEach(m=>t.push({id:m.id, role:m.role||'member', uri:m.uri}));
+    topology.nodes.filter(n=>n.role==='mongos').forEach(n=>t.push({id:n.id, role:'mongos', uri:n.uri}));
+  } else if((memberNodes||[]).length>0){
+    (memberNodes||[]).forEach(m=>t.push({id:m.id, role:m.role||'member', uri:m.uri}));
+  }
+  if(t.length===0) t.push({id:'standalone', role:'standalone', uri});
+  return t;
+}
+
+async function securityStatus(){
+  // Member enumeration may not have completed yet (e.g. landing here directly).
+  if((memberNodes||[]).length===0){ try{ await refreshMemberNodes(); }catch(_){} }
+  const targets=securityTargets();
+  const headerActions=`<button onclick="nav('securityStatus')" class="btn-sm">↻ Refresh</button>`;
+  const res=await api('/api/db/security-status',{
+    node_id:   targets.map(t=>t.id),
+    node_role: targets.map(t=>t.role),
+    node_uri:  targets.map(t=>t.uri),
+  });
+  if(!res||res.error) return setMainWithError('🔐','Security Status',headerActions,res?.error||'Failed',uri);
+  const nodes=res.nodes||[];
+
+  const reachable=nodes.filter(n=>!n.error);
+  const insecure =reachable.filter(n=>!n.authEnabled);
+  const secure   =reachable.filter(n=>n.authEnabled);
+
+  // Aggregate authentication-mechanism counters across all inspected nodes.
+  const agg={};
+  nodes.forEach(n=>(n.mechanisms||[]).forEach(m=>{
+    const a=agg[m.mechanism]||(agg[m.mechanism]={mechanism:m.mechanism,authReceived:0,authSuccessful:0,specReceived:0,specSuccessful:0,clusterReceived:0,clusterSuccessful:0});
+    a.authReceived+=m.authReceived||0; a.authSuccessful+=m.authSuccessful||0;
+    a.specReceived+=m.specReceived||0; a.specSuccessful+=m.specSuccessful||0;
+    a.clusterReceived+=m.clusterReceived||0; a.clusterSuccessful+=m.clusterSuccessful||0;
+  }));
+  const totSucc=a=>(a.authSuccessful+a.specSuccessful+a.clusterSuccessful);
+  const aggList=Object.values(agg).sort((x,y)=>totSucc(y)-totSucc(x));
+  const fmtN=n=>(n||0).toLocaleString();
+
+  // ── overall posture banner ──
+  let banner='';
+  if(insecure.length>0){
+    banner=`<div class="rounded-lg p-4" style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.5)">
+      <div class="font-bold text-red-400">🚨 No security configuration found</div>
+      <div class="text-sm text-red-200 mt-1">All connections have unrestricted read/write access on
+        ${insecure.length} of ${reachable.length} member(s): <span class="mono">${insecure.map(n=>esc(n.host||n.id)).join(', ')}</span>.</div>
+      <div class="text-xs text-gray-400 mt-2">Enable access control via <span class="mono">security.authorization: enabled</span>
+        (or a keyFile / <span class="mono">--auth</span>) and create an administrative user.</div>
+    </div>`;
+  } else if(reachable.length>0){
+    banner=`<div class="rounded-lg p-4" style="background:rgba(0,237,100,.08);border:1px solid rgba(0,237,100,.4)">
+      <div class="font-bold text-mg">✓ Access control enabled</div>
+      <div class="text-sm text-gray-300 mt-1">Authentication is required on all ${reachable.length} reachable member(s).</div>
+    </div>`;
+  }
+
+  const roleBadge=r=>{
+    const role=(r||'').toLowerCase();
+    let cls='b-shard';
+    if(role.includes('config')) cls='b-configsvr';
+    else if(role.includes('primary')) cls='b-PRIMARY';
+    else if(role.includes('secondary')) cls='b-SECONDARY';
+    return `<span class="mb ${cls}">${esc(r||'—')}</span>`;
+  };
+
+  const memberRows=nodes.map(n=>{
+    if(n.error){
+      return `<tr>
+        <td class="mono text-xs">${esc(n.host||n.id)}</td>
+        <td>${roleBadge(n.role)}</td>
+        <td class="text-xs text-gray-500" colspan="6">⚠️ ${esc(n.error)}</td>
+      </tr>`;
+    }
+    const authCell=n.authEnabled
+      ? `<span class="text-mg font-bold text-xs">✓ Required</span><div class="text-gray-600 text-xs">${esc(n.detected||'')}</div>`
+      : `<span class="text-red-400 font-bold text-xs">✗ Not required</span><div class="text-red-300/70 text-xs">unrestricted access</div>`;
+    const tls=(n.tlsMode&&n.tlsMode!=='disabled')
+      ? `<span class="text-mg text-xs">${esc(n.tlsMode)}</span>`
+      : `<span class="text-gray-600 text-xs">${esc(n.tlsMode||'—')}</span>`;
+    return `<tr class="${n.authEnabled?'':'bg-red-900/10'}">
+      <td class="mono text-xs">${esc(n.host||n.id)}</td>
+      <td>${roleBadge(n.role)}</td>
+      <td>${authCell}</td>
+      <td class="mono text-xs text-gray-300">${esc(n.authorization)}</td>
+      <td class="text-xs text-center">${n.keyFile?'<span class="text-mg">✓</span>':'<span class="text-gray-600">—</span>'}</td>
+      <td class="mono text-xs text-gray-400">${esc(n.clusterAuthMode||'—')}</td>
+      <td>${tls}</td>
+      <td class="mono text-xs text-gray-500">${esc(n.version||'—')}</td>
+    </tr>`;
+  }).join('');
+
+  const weak=aggList.find(m=>m.mechanism==='SCRAM-SHA-1'&&totSucc(m)>0);
+  const mechRows=aggList.length?aggList.map(m=>{
+    const used=totSucc(m)>0;
+    return `<tr class="${used?'':'opacity-50'}">
+      <td class="mono text-xs font-bold ${used?'text-gray-200':'text-gray-500'}">${esc(m.mechanism)}</td>
+      <td class="mono text-xs text-gray-300">${fmtN(m.authSuccessful)} <span class="text-gray-600">/ ${fmtN(m.authReceived)}</span></td>
+      <td class="mono text-xs text-gray-300">${fmtN(m.specSuccessful)} <span class="text-gray-600">/ ${fmtN(m.specReceived)}</span></td>
+      <td class="mono text-xs text-gray-300">${fmtN(m.clusterSuccessful)} <span class="text-gray-600">/ ${fmtN(m.clusterReceived)}</span></td>
+      <td class="mono text-xs font-bold ${used?'text-mg':'text-gray-600'}">${fmtN(totSucc(m))}</td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="5" class="text-center text-gray-600 py-6">No authentication-mechanism counters reported — no auth attempts since the servers started, or counters unavailable on this build.</td></tr>`;
+
+  setMain(`<div class="space-y-5">
+    ${pageHeader('🔐','Security Status',`${nodes.length} member(s) inspected`,headerActions)}
+    ${banner}
+    <div class="grid grid-cols-4 gap-3">
+      ${statCard('Members',nodes.length,'','')}
+      ${statCard('Auth Required',secure.length,reachable.length?`of ${reachable.length} reachable`:'',(secure.length===reachable.length&&reachable.length>0)?'text-mg':'text-yellow-400')}
+      ${statCard('Unsecured',insecure.length,'',insecure.length>0?'text-red-400':'text-mg')}
+      ${statCard('Mechanisms In Use',aggList.filter(m=>totSucc(m)>0).length,'','')}
+    </div>
+    <div class="card">
+      <div class="card-header">🖥️ Members <span class="text-gray-600 font-normal text-xs ml-1">authentication posture per node</span></div>
+      <div class="overflow-x-auto">
+        <table class="dt"><thead><tr><th>Member</th><th>Role</th><th>Auth</th><th>authorization</th><th>keyFile</th><th>clusterAuthMode</th><th>TLS</th><th>Version</th></tr></thead>
+        <tbody>${memberRows||'<tr><td colspan="8" class="text-center text-gray-600 py-6">No members</td></tr>'}</tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">🔑 Authentication Mechanism Usage <span class="text-gray-600 font-normal text-xs ml-1">successful / received · summed across members</span></div>
+      <div class="overflow-x-auto">
+        <table class="dt"><thead><tr><th>Mechanism</th><th>Authenticate</th><th>Speculative</th><th>Cluster</th><th>Total OK</th></tr></thead>
+        <tbody>${mechRows}</tbody></table>
+      </div>
+      ${weak?`<div class="text-xs text-yellow-400/80 px-3 pb-2">⚠️ SCRAM-SHA-1 (weaker, SHA-1 based) has successful authentications — consider migrating users to SCRAM-SHA-256.</div>`:''}
+      <div class="text-xs text-gray-600 px-3 pb-3">Counters are cumulative per mongod/mongos process since its last restart; "speculative" is the fast-path authentication bundled into the connection handshake.</div>
+    </div>
+  </div>`);
+}
 
 // ═══════════════════════════════════════════════════════════ LIVE TRAFFIC MONITOR
 
