@@ -30,6 +30,7 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -43,7 +44,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const version = "0.3.5"
+const version = "0.3.6"
 
 var debugMode bool
 var viewOnly  bool
@@ -230,7 +231,27 @@ func jsonOK(w http.ResponseWriter, v interface{}) {
 	_, _ = w.Write([]byte{'\n'})
 }
 
-func formURI(r *http.Request) string { return strings.TrimSpace(r.FormValue("uri")) }
+// formURI returns the request's target URI with per-shard credentials applied.
+// This is the central choke point: every handler that dials the `uri` form
+// value gets shard-credential substitution for free, so a member URI carrying
+// the mongos credentials (the frontend's historical default) is transparently
+// rewritten to the credentials the user supplied for that shard. Idempotent
+// when the URI already carries the correct shard credentials.
+func formURI(r *http.Request) string {
+	_ = r.ParseForm() // idempotent; parseShardCredentials reads r.Form directly
+	u := strings.TrimSpace(r.FormValue("uri"))
+	if u == "" {
+		return u
+	}
+	return applyShardCredentials(u, parseShardCredentials(r))
+}
+
+// rawFormURI returns the `uri` form value verbatim — NO shard-credential
+// substitution. Required by /api/ping, which the auth modal uses to test
+// *candidate* credentials embedded in the URI: substituting stored credentials
+// there would silently test the wrong identity (e.g. validate stale creds, or
+// mask a typo in the new ones).
+func rawFormURI(r *http.Request) string { return strings.TrimSpace(r.FormValue("uri")) }
 
 // parseShardCredentials extracts per-shard credentials from form data
 func parseShardCredentials(r *http.Request) map[string]struct{ username, password string } {
@@ -238,18 +259,37 @@ func parseShardCredentials(r *http.Request) map[string]struct{ username, passwor
 	ids := r.Form["shard_creds_id[]"]
 	users := r.Form["shard_creds_user[]"]
 	passes := r.Form["shard_creds_pass[]"]
-	
+	// Optional parallel array: comma-separated member host:port list per shard.
+	// Individual-member URIs (mongodb://host:port/?directConnection=true) carry
+	// no shard name, so name-substring matching alone can't resolve them — the
+	// host list lets applyShardCredentials match those URIs too.
+	hosts := r.Form["shard_creds_hosts[]"]
+
 	for i := 0; i < len(ids) && i < len(users) && i < len(passes); i++ {
-		creds[ids[i]] = struct{ username, password string }{users[i], passes[i]}
+		c := struct{ username, password string }{users[i], passes[i]}
+		creds[ids[i]] = c
+		if i < len(hosts) && hosts[i] != "" {
+			for _, h := range strings.Split(hosts[i], ",") {
+				h = strings.TrimSpace(h)
+				if h != "" {
+					creds[h] = c
+				}
+			}
+		}
 	}
 	return creds
 }
 
-// applyShardCredentials injects shard-specific credentials into a URI if available
+// applyShardCredentials injects shard-specific credentials into a URI if available.
+// Credentials arrive as plain text from the auth modal, so they are
+// percent-encoded here before being embedded in the URI userinfo.
 func applyShardCredentials(uri string, shardCreds map[string]struct{ username, password string }) string {
 	if len(shardCreds) > 0 {
 		debugLog(fmt.Sprintf("applyShardCredentials: checking %d credential sets for URI: %s", len(shardCreds), maskURI(uri)))
 	}
+	// encodeURIComponent equivalent: QueryEscape, but spaces as %20 (the '+'
+	// form is query-string semantics and is NOT decoded in URI userinfo).
+	enc := func(s string) string { return strings.ReplaceAll(url.QueryEscape(s), "+", "%20") }
 	
 	// Try to match shard ID in the URI
 	for shardID, creds := range shardCreds {
@@ -262,7 +302,7 @@ func applyShardCredentials(uri string, shardCreds map[string]struct{ username, p
 		// Check if shardID is contained in the URI
 		if strings.Contains(uri, shardID) {
 			debugLog(fmt.Sprintf("applyShardCredentials: MATCHED (direct contains) - injecting credentials for %s", shardID))
-			return injectCredentials(uri, creds.username, creds.password)
+			return injectCredentials(uri, enc(creds.username), enc(creds.password))
 		}
 		
 		// Also check if the URI contains this identifier after the @
@@ -271,7 +311,7 @@ func applyShardCredentials(uri string, shardCreds map[string]struct{ username, p
 			hostPart := uri[idx+1:]
 			if strings.Contains(hostPart, shardID) {
 				debugLog(fmt.Sprintf("applyShardCredentials: MATCHED (hostname contains) - injecting credentials for %s", shardID))
-				return injectCredentials(uri, creds.username, creds.password)
+				return injectCredentials(uri, enc(creds.username), enc(creds.password))
 			}
 		}
 		
@@ -3335,6 +3375,7 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	rsURIs := r.Form["rs_uri"]
 	if len(rsURIs) == 0 { rsURIs = []string{formURI(r)} }
+	shardCreds := parseShardCredentials(r)
 
 	type MemberLag struct {
 		Host       string  `json:"host"`
@@ -3368,9 +3409,14 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(rsURI string) {
 			defer wg.Done()
-			result := RSOplog{URI: rsURI}
+			// Report the masked URI (no credentials) — it's rendered in the UI.
+			result := RSOplog{URI: maskURI(rsURI)}
 
-			c, err := getClient(rsURI)
+			// Substitute per-shard credentials: rs_uri values come from the
+			// frontend topology and historically embed the mongos credentials.
+			finalURI := applyShardCredentials(rsURI, shardCreds)
+
+			c, err := getClient(finalURI)
 			if err != nil { result.Error = err.Error(); mu.Lock(); results = append(results, result); mu.Unlock(); return }
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -4270,7 +4316,9 @@ func handleWiredTiger(w http.ResponseWriter, r *http.Request) {
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	uri := formURI(r)
+	// rawFormURI: ping is the auth modal's credential tester — the URI's own
+	// credentials must be dialed verbatim, never replaced by stored ones.
+	uri := rawFormURI(r)
 	if uri == "" {
 		jsonErr(w, "uri required", 400)
 		return

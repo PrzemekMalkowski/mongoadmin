@@ -54,10 +54,12 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
   <tr>
     <td><a href="docs/screenshots/users_roles.png"><img src="docs/screenshots/users_roles.png" alt="Users & Roles" width="280"/></a></td>
     <td><a href="docs/screenshots/query_explain.png"><img src="docs/screenshots/query_explain.png" alt="Query Explain" width="280"/></a></td>
+    <td><a href="docs/screenshots/oplog_stats.png"><img src="docs/screenshots/oplog_stats.png" alt="Query Explain" width="280"/></a></td>
   </tr>
   <tr>
     <td align="center"><em>Users &amp; Roles</em></td>
     <td align="center"><em>Query Explain</em></td>
+    <td align="center"><em>Oplog Statistics</em></td>
   </tr>
 </table>
 

@@ -110,7 +110,7 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
       onpaste="uriInputPaste(event)" oninput="uriInputChanged(this)"/>
     <input id="uriRaw" type="hidden"/>
     <button onclick="doConnect()" class="bg-mg text-black text-sm font-bold px-4 py-1.5 rounded hover:bg-mg-dark transition-colors">Connect</button>
-    <button id="disconnectBtn" onclick="doDisconnect()" class="hidden border border-panel-border text-gray-400 text-sm px-3 py-1.5 rounded hover:border-red-600 hover:text-red-400 transition-colors">✕</button>
+    <button id="disconnectBtn" onclick="doDisconnect()" class="hidden border border-panel-border text-gray-400 text-sm px-3 py-1.5 rounded hover:border-red-600 hover:text-red-400 transition-colors">✕ Disconnect</button>
   </div>
   <div id="connStatus" class="text-xs font-bold px-2 py-1 rounded-full bg-yellow-900/40 text-yellow-400 ml-auto">DISCONNECTED</div>
   <div id="connUri" class="text-xs text-gray-500 font-mono hidden mr-2" title="Connection string (password masked)"></div>
@@ -585,7 +585,8 @@ let opSortCol='secs_running', opSortDir='desc', opCurrentList=[], opView='list';
 let memberNodes=[];
 let shardCredentials={}; // Map of shardId -> {username, password}
 let shardUriMap={}; // Map of shardId -> original URI for credential testing
-let pendingShardAuth=null; // {shardId, onComplete}
+let pendingShardAuth=null; // {shardId, onComplete, onCancel}
+let declinedShardAuth={}; // shardId -> true once the user hit Cancel — stops re-prompting until they explicitly re-authenticate
 let _membersGen=0; // Generation counter — incremented on each Cluster Diagram load to cancel stale async updates
 let _lgParsed=[]; // Current log viewer display lines — kept module-level so lgToggle can access them by row index
 // Live Traffic Monitor state
@@ -596,6 +597,7 @@ let tmWindowSecs=3600, tmIntervalSecs=1;
 let tmHidden=new Set();             // host IDs whose series are hidden on the chart
 let tmZoom={};                      // {metricIdx: {tMin, tMax, dragX0}} per-canvas zoom state
 let urShowBuiltin = false;  // User mgmt: show built-in roles toggle
+let urShowSysDbs  = false;  // User mgmt: include config/local in the db selector
 let urSelectedDb  = '';     // User mgmt: persisted db selection
 const rsNodesList   =()=>topology.nodes.filter(n=>n.role==='shard'||n.role==='configsvr');
 const mongosNodesList=()=>topology.nodes.filter(n=>n.role==='mongos');
@@ -673,15 +675,23 @@ async function refreshMemberNodes() {
   const rsList=rsNodesList();
   const body=new URLSearchParams({uri});
   rsList.forEach(n=>body.append('rs_uri',n.uri));
+  appendShardCreds(body);
   try{
     const r=await fetch('/api/rs/members',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
-    memberNodes=await r.json();
-    if(!Array.isArray(memberNodes)) memberNodes=[];
-  }catch(_){memberNodes=[];}
+    const fresh=await r.json();
+    if(Array.isArray(fresh)){
+      // Merge: keep previously discovered members whose RS is absent from this
+      // run (the backend silently drops RSes it can't reach, e.g. a shard whose
+      // credentials were just revoked mid-session) — fresher data wins per id.
+      const byId={}; for(const m of (memberNodes||[])) byId[m.id]=m;
+      for(const m of fresh) byId[m.id]=m;
+      memberNodes=Object.values(byId);
+    }
+  }catch(_){/* keep existing memberNodes */}
 }
 
 function doDisconnect(){
-  uri=''; topology={type:'replicaset',nodes:[]}; memberNodes=[]; shardCredentials={};
+  uri=''; topology={type:'replicaset',nodes:[]}; memberNodes=[]; shardCredentials={}; declinedShardAuth={};
   setStatus('DISCONNECTED','yellow');
   document.getElementById('disconnectBtn').classList.add('hidden');
   document.getElementById('pingMs').classList.add('hidden');
@@ -722,6 +732,51 @@ function setMain(h){
 }
 
 // ═══════════════════════════════════════════════════════════ API
+// ── Shard credential resolution ─────────────────────────────────────────────
+// Member URIs (mongodb://host:port/?directConnection=true) carry no shard name,
+// so both the backend and the UI need a host ⇄ shard mapping to pick the right
+// credentials. We assemble it from every source we have: memberNodes (rs field),
+// topology nodes (replicaSet=... URIs / "rs/host,host" ids), and the original
+// failing URIs remembered in shardUriMap.
+function hostsFromUriStr(u){
+  if(!u) return [];
+  let s = String(u).replace(/^mongodb(\+srv)?:\/\//,'');
+  const at = s.indexOf('@'); if(at>=0) s = s.slice(at+1);
+  const end = s.search(/[/?]/); if(end>=0) s = s.slice(0,end);
+  return s.split(',').map(x=>x.trim()).filter(Boolean);
+}
+function shardHostsFor(shardId){
+  const hosts = new Set();
+  for (const m of (memberNodes||[])) if (m.rs === shardId) hostsFromUriStr(m.uri).forEach(h=>hosts.add(h));
+  const tn = (topology.nodes||[]).find(n => n.id === shardId);
+  if (tn) hostsFromUriStr(tn.uri).forEach(h=>hosts.add(h));
+  if (shardUriMap[shardId]) hostsFromUriStr(shardUriMap[shardId]).forEach(h=>hosts.add(h));
+  return [...hosts];
+}
+// Resolve the canonical shard id (rs name) for any URI — member or RS-level.
+function shardIdForUri(u){
+  const m = String(u||'').match(/shard\d+/i);
+  if (m) return m[0];
+  const hosts = new Set(hostsFromUriStr(u));
+  for (const mb of (memberNodes||[])) if (mb.rs && hostsFromUriStr(mb.uri).some(h=>hosts.has(h))) return mb.rs;
+  for (const n of (topology.nodes||[])) if (hostsFromUriStr(n.uri).some(h=>hosts.has(h))) return n.id;
+  for (const [sid, su] of Object.entries(shardUriMap)) if (hostsFromUriStr(su).some(h=>hosts.has(h))) return sid;
+  return extractShardIdFromUri(String(u||''));
+}
+// Append stored shard credentials (with their member-host lists) to a request
+// body. EVERY request that may touch a shard must go through this — raw
+// fetch() builders that skip it (as oplogStats and refreshMemberNodes once
+// did) silently fall back to mongos credentials on the server.
+function appendShardCreds(body){
+  for (const [shardId, creds] of Object.entries(shardCredentials)) {
+    body.append('shard_creds_id[]', shardId);
+    body.append('shard_creds_user[]', creds.username);
+    body.append('shard_creds_pass[]', creds.password);
+    body.append('shard_creds_hosts[]', shardHostsFor(shardId).join(','));
+  }
+  return body;
+}
+
 async function api(path,params={}){
   // Build the body manually so array-valued params (like targetUri:[...] for
   // sync calls) get serialized as repeated keys instead of comma-joined into
@@ -739,11 +794,7 @@ async function api(path,params={}){
     debugLog(`[api] Sending shard credentials: ${JSON.stringify(Object.keys(shardCredentials))}`);
   }
   
-  for (const [shardId, creds] of Object.entries(shardCredentials)) {
-    body.append('shard_creds_id[]', shardId);
-    body.append('shard_creds_user[]', creds.username);
-    body.append('shard_creds_pass[]', creds.password);
-  }
+  appendShardCreds(body);
   
   debugLog(`[api] POST ${path} with params: ${body.toString().substring(0, 100)}`);
   
@@ -775,17 +826,28 @@ async function api(path,params={}){
     
     // Check for shard auth errors and prompt if needed
     if (result.error && result.error.includes('Unauthorized') && result.failedShard) {
+      // Canonicalize to the rs/shard name — the backend falls back to a bare
+      // hostname for member URIs, which would fragment the credential store.
+      const sid = shardIdForUri(result.failedUri || result.failedShard) || result.failedShard;
       // Store the original URI if provided
       if (result.failedUri) {
-        shardUriMap[result.failedShard] = result.failedUri;
-        debugLog(`[api] Stored original URI for ${result.failedShard}: ${result.failedUri}`);
+        shardUriMap[sid] = result.failedUri;
+        debugLog(`[api] Stored original URI for ${sid}: ${result.failedUri}`);
       }
-      
+      // If we already hold working credentials for this shard but the failing
+      // call used a URI the backend couldn't match (pre-fix requests), retry
+      // once — the retry now carries the host list and will match.
+      if (declinedShardAuth[sid]) {
+        return {error: 'AUTH_REQUIRED:' + sid, authCancelled: true, failedShard: sid};
+      }
       return new Promise((resolve) => {
-        openShardAuth(result.failedShard, result.error, async () => {
+        openShardAuth(sid, result.error, async () => {
           // Retry with new credentials
           const retryResult = await api(path, params);
           resolve(retryResult);
+        }, () => {
+          // Cancelled — unblock the caller instead of spinning forever.
+          resolve({error: 'AUTH_REQUIRED:' + sid, authCancelled: true, failedShard: sid});
         });
       });
     }
@@ -799,24 +861,28 @@ async function api(path,params={}){
 async function apiFanOut(path,extraURIs,key='rs_uri'){
   const body=new URLSearchParams({uri});
   extraURIs.forEach(u=>body.append(key,u));
-  
-  // Add shard credentials
-  for (const [shardId, creds] of Object.entries(shardCredentials)) {
-    body.append('shard_creds_id[]', shardId);
-    body.append('shard_creds_user[]', creds.username);
-    body.append('shard_creds_pass[]', creds.password);
-  }
-  
+  appendShardCreds(body);
   const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   return r.json();
 }
 
 // ═══════════════════════════════════════════════════════════ INSTANCE SELECTOR
-// Stamp the main connection credentials onto any topology URI.
+// Stamp credentials onto any topology URI. Prefers shard-specific credentials
+// (when the target's hosts belong to a shard the user authenticated separately)
+// and falls back to the main connection credentials otherwise.
 // Uses getHostFromUri to extract the host part cleanly, then rebuilds the URI.
 // Preserves ?query parameters from the target URI.
 function injectCredsIntoUri(targetUri) {
-  const creds = extractCredentials(uri); // from global connected URI
+  // Main-connection creds come straight out of the URI → already percent-encoded.
+  let creds = extractCredentials(uri);
+  // Shard creds come from the auth modal → plain text, must be encoded here.
+  const sid = shardIdForUri(targetUri);
+  if (sid && shardCredentials[sid]) {
+    creds = {
+      username: encodeURIComponent(shardCredentials[sid].username),
+      password: encodeURIComponent(shardCredentials[sid].password),
+    };
+  }
   if (!creds.username || !creds.password) return targetUri;
 
   const host = getHostFromUri(targetUri);
@@ -910,6 +976,11 @@ function mongodInstanceSelect(currentURI,onchangeFn){
 // Show an error that keeps the page header + instance selector visible
 // so the user can switch to another instance without losing navigation.
 function setMainWithError(icon, title, actions, errorMsg, instanceUri){
+  const am = String(errorMsg||'').match(/^AUTH_REQUIRED:(.*)$/);
+  if (am) {
+    setMain(`<div class="space-y-5">${pageHeader(icon, title, '', actions)}${authRequiredBlock(am[1])}</div>`);
+    return;
+  }
   const host = instanceUri ? getHostFromUri(instanceUri) : '';
   const detail = host ? ` (${host})` : '';
   setMain(`<div class="space-y-5">
@@ -943,7 +1014,7 @@ async function rsStatus(){
     if(rs.error){
       const node=topology.nodes.find(n=>n.uri===rs.uri);
       const rt=node?`<span class="mb b-${node.role} ml-2">${node.role}</span>`:'';
-      cards+=`<div class="card"><div class="card-header">⚠️ ${esc(rs.shardId)} ${rt}</div><div class="p-4 text-red-400 text-sm mono">${esc(rs.error)}</div></div>`;
+      cards+=`<div class="card"><div class="card-header">⚠️ ${esc(rs.shardId)} ${rt}</div>${cardErrBlock(rs.error, shardIdForUri(rs.uri||rs.shardId))}</div>`;
       continue;
     }
     const d=rs.data||{},mems=d.members||[];
@@ -1220,7 +1291,10 @@ async function loadRsSection(node, idx, creds, gen) {
     const memberCardsHtml=mems.map((m,mIdx)=>{
       const st=sm[m.host]||{}, state=stateOf(m,sm);
       const isArbiter=m.arbiterOnly||state==='ARBITER';
-      const directURI=buildUriWithCredentials(m.host, creds, {directConnection:'true'});
+      // injectCredsIntoUri (not buildUriWithCredentials with the page-level
+      // mongos creds): members of separately-authenticated shards need THEIR
+      // credentials, which the shard-aware injector resolves per host.
+      const directURI=injectCredsIntoUri(`mongodb://${m.host}/?directConnection=true`);
       const actionBtns=isArbiter
         ?`<div class="text-xs text-gray-600 mt-1 italic">Arbiter — no data operations</div>`
         :`<div class="flex gap-2 mt-1">
@@ -1269,7 +1343,7 @@ async function loadRsSection(node, idx, creds, gen) {
     // If the node is down, the spinner stays until the Go driver times out (5 s), then ✗ appears.
     mems.forEach((m,mIdx)=>{
       if (m.arbiterOnly || stateOf(m,sm)==='ARBITER') return;
-      const directURI=buildUriWithCredentials(m.host, creds, {directConnection:'true'});
+      const directURI=injectCredsIntoUri(`mongodb://${m.host}/?directConnection=true`);
       api('/api/server/status',{uri:directURI}).then(ss=>{
         if (gen!==_membersGen) return;
         const verEl=document.getElementById(`ver-${idx}-${mIdx}`);
@@ -2182,26 +2256,14 @@ function _matchesBatchFilter(op, p) {
 // to do *as the session sees it*. Falls back to a muted "couldn't read"
 // state if the server refused (e.g. no auth at all, or the connection
 // dropped between fetches).
-function renderSessionCard(connStatus) {
-  if (!connStatus || connStatus.error) {
-    return `<div class="card">
-      <div class="card-header">🛡️ Your Session
-        <span class="text-gray-600 font-normal text-xs ml-2">connectionStatus</span>
-      </div>
-      <div class="p-4 text-xs text-gray-500">
-        ${connStatus && connStatus.error
-          ? `Couldn't read connection status: <code class="mono text-red-300">${esc(connStatus.error)}</code>`
-          : 'No connection status available.'}
-      </div>
-    </div>`;
-  }
-  const info  = connStatus.authInfo || {};
-  const users = Array.isArray(info.authenticatedUsers)     ? info.authenticatedUsers     : [];
-  const roles = Array.isArray(info.authenticatedUserRoles) ? info.authenticatedUserRoles : [];
-
-  const userPills = users.length
-    ? users.map(u => `<span class="mb b-PRIMARY mono text-xs">${esc(u.user)}@${esc(u.db)}</span>`).join(' ')
-    : '<span class="text-gray-600 text-xs">— anonymous / no authentication —</span>';
+// Renders the "Your Session" card. Accepts a list of {label, status} where
+// status is a connectionStatus response — one entry for mongos and one per
+// shard — because in a sharded cluster each shard authenticates separately:
+// you may be a different user, with different effective roles, on each.
+// (Back-compat: a single bare connectionStatus object is also accepted.)
+function renderSessionCard(sessions) {
+  if (sessions && !Array.isArray(sessions)) sessions = [{label: '', status: sessions}];
+  sessions = sessions || [];
 
   // Sort: built-in roles last (they're noisy and well-known), custom first.
   const builtinSet = new Set([
@@ -2210,34 +2272,60 @@ function renderSessionCard(connStatus) {
     'readAnyDatabase','readWriteAnyDatabase','dbAdminAnyDatabase','userAdminAnyDatabase',
     'backup','restore','root','__system','enableSharding',
   ]);
-  const sortedRoles = [...roles].sort((a,b) => {
-    const ab = builtinSet.has(a.role) ? 1 : 0;
-    const bb = builtinSet.has(b.role) ? 1 : 0;
-    if (ab !== bb) return ab - bb;
-    return (a.role||'').localeCompare(b.role||'');
-  });
-  const rolePills = sortedRoles.length
-    ? sortedRoles.map(r => {
-        const cls = builtinSet.has(r.role) ? 'b-SECONDARY' : 'b-PRIMARY';
-        return `<span class="mb ${cls} mono text-xs">${esc(r.role)}<span class="text-gray-500"> @ ${esc(r.db)}</span></span>`;
-      }).join(' ')
-    : '<span class="text-gray-600 text-xs">— no roles —</span>';
 
+  const renderOne = (label, connStatus) => {
+    const head = label
+      ? `<div class="text-xs font-bold text-gray-400 mb-2">${esc(label)}</div>` : '';
+    if (!connStatus || connStatus.error) {
+      const raw = connStatus?.error || '';
+      const isAuth = /AUTH_REQUIRED|unauthorized|authentication failed|requires authentication/i.test(raw);
+      return `<div class="p-3 rounded bg-panel-inner border border-panel-border">${head}
+        <div class="text-xs ${isAuth?'text-yellow-400':'text-gray-500'}">
+          ${!connStatus ? 'No connection status available.'
+            : isAuth ? '🔒 Not authenticated on this target — identity unknown.'
+            : `Couldn't read connection status: <code class="mono text-red-300">${esc(raw)}</code>`}
+        </div></div>`;
+    }
+    const info  = connStatus.authInfo || {};
+    const users = Array.isArray(info.authenticatedUsers)     ? info.authenticatedUsers     : [];
+    const roles = Array.isArray(info.authenticatedUserRoles) ? info.authenticatedUserRoles : [];
+    const userPills = users.length
+      ? users.map(u => `<span class="mb b-PRIMARY mono text-xs">${esc(u.user)}@${esc(u.db)}</span>`).join(' ')
+      : '<span class="text-gray-600 text-xs">— anonymous / no authentication —</span>';
+    const sortedRoles = [...roles].sort((a,b) => {
+      const ab = builtinSet.has(a.role) ? 1 : 0;
+      const bb = builtinSet.has(b.role) ? 1 : 0;
+      if (ab !== bb) return ab - bb;
+      return (a.role||'').localeCompare(b.role||'');
+    });
+    const rolePills = sortedRoles.length
+      ? sortedRoles.map(r => {
+          const cls = builtinSet.has(r.role) ? 'b-SECONDARY' : 'b-PRIMARY';
+          return `<span class="mb ${cls} mono text-xs">${esc(r.role)}<span class="text-gray-500"> @ ${esc(r.db)}</span></span>`;
+        }).join(' ')
+      : '<span class="text-gray-600 text-xs">— no roles —</span>';
+    return `<div class="p-3 rounded bg-panel-inner border border-panel-border">${head}
+      <div class="space-y-2">
+        <div>
+          <div class="text-xs text-gray-500 font-semibold uppercase mb-1">Authenticated as</div>
+          <div class="flex flex-wrap gap-1.5">${userPills}</div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-500 font-semibold uppercase mb-1">Effective roles
+            <span class="text-gray-600 font-normal normal-case ml-1">(${sortedRoles.length})</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">${rolePills}</div>
+        </div>
+      </div></div>`;
+  };
+
+  const multi = sessions.length > 1;
   return `<div class="card">
     <div class="card-header">🛡️ Your Session
-      <span class="text-gray-600 font-normal text-xs ml-2">db.runCommand({connectionStatus: 1})</span>
+      <span class="text-gray-600 font-normal text-xs ml-2">db.runCommand({connectionStatus: 1})${multi?' — per target; identities and roles may differ between mongos and each shard':''}</span>
     </div>
-    <div class="p-4 space-y-3">
-      <div>
-        <div class="text-xs text-gray-500 font-semibold uppercase mb-1.5">Authenticated as</div>
-        <div class="flex flex-wrap gap-1.5">${userPills}</div>
-      </div>
-      <div>
-        <div class="text-xs text-gray-500 font-semibold uppercase mb-1.5">Effective roles
-          <span class="text-gray-600 font-normal normal-case ml-1">(${sortedRoles.length})</span>
-        </div>
-        <div class="flex flex-wrap gap-1.5">${rolePills}</div>
-      </div>
+    <div class="p-3 grid grid-cols-1 ${multi?'lg:grid-cols-2':''} gap-3">
+      ${sessions.map(s => renderOne(s.label, s.status)).join('')}
     </div>
   </div>`;
 }
@@ -2273,13 +2361,42 @@ function rsSelect(currentURI, onchangeFn) {
 // server and are picked up by every mongos instance in the cluster. Selecting
 // the configsvr directly would bypass mongos's auth-cache invalidation and
 // could cause new credentials to appear stale to apps hitting other mongos.
+// Render a Users/Roles fetch error. Authorization failures (very common when a
+// db like `config` or `local` is selected) get a concise explanation instead of
+// the raw driver blob; everything else falls back to the plain message.
+//   kind = 'users' | 'roles'   db = selected database
+function urErrBlock(err, kind, db){
+  const raw = String(err||'');
+  const isAuth = /not authorized|unauthorized|requires authentication|authentication failed/i.test(raw);
+  if(!isAuth) return `<div class="text-xs text-red-300 p-2 break-all">${esc(raw)}</div>`;
+  const action  = kind==='roles' ? 'viewRole' : 'viewUser';
+  const special = (db==='config' || db==='local');
+  const body = special
+    ? `The <span class="mono">${esc(db)}</span> database is deliberately excluded from the
+       <span class="mono">*AnyDatabase</span> built-in roles (<span class="mono">readWriteAnyDatabase</span>,
+       <span class="mono">dbAdminAnyDatabase</span>, <span class="mono">userAdminAnyDatabase</span>, …), so any
+       privilege there must be granted explicitly. Reading ${kind} also needs the
+       <span class="mono">${action}</span> action — which <span class="mono">clusterAdmin</span>,
+       <span class="mono">clusterManager</span> and the <span class="mono">dbAdmin*</span> roles do not include.
+       ${db==='config' ? 'User-defined accounts almost never live in <span class="mono">config</span>; application users belong in <span class="mono">admin</span>.' : ''}`
+    : `Reading ${kind} requires the <span class="mono">${action}</span> action on
+       <span class="mono">${esc(db)}</span>, granted by <span class="mono">userAdmin</span> or
+       <span class="mono">userAdminAnyDatabase</span> — the <span class="mono">readWrite*</span>/<span class="mono">dbAdmin*</span>
+       roles don't confer it.`;
+  return `<div class="text-xs p-2 rounded" style="background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.35)">
+    <div class="font-semibold mb-1" style="color:#e3b341">🔒 Not authorized to read ${kind} in <span class="mono">${esc(db)}</span></div>
+    <div class="text-gray-400 leading-relaxed">${body}</div>
+    <details class="mt-1"><summary class="cursor-pointer text-gray-600">server message</summary>
+      <div class="mono text-gray-600 mt-1 break-all">${esc(raw)}</div></details>
+  </div>`;
+}
 function renderMongosCard(users, roles, usersErr, rolesErr, db, showBuiltin, mongosUri) {
   const canWrite = !VIEW_ONLY;
   const customRoles = (roles||[]).filter(r=>!r.isBuiltin);
   const visible     = showBuiltin ? (roles||[]) : customRoles;
 
   let rolesHtml = rolesErr
-    ? `<div class="text-xs text-red-300 p-2">${esc(rolesErr)}</div>`
+    ? urErrBlock(rolesErr, 'roles', db)
     : visible.length === 0
       ? `<div class="text-xs text-gray-600 p-2">No ${showBuiltin?'':'custom '}roles</div>`
       : `<table class="dt text-xs w-full">
@@ -2298,7 +2415,7 @@ function renderMongosCard(users, roles, usersErr, rolesErr, db, showBuiltin, mon
           }).join('')}</tbody></table>`;
 
   let usersHtml = usersErr
-    ? `<div class="text-xs text-red-300 p-2">${esc(usersErr)}</div>`
+    ? urErrBlock(usersErr, 'users', db)
     : !(users||[]).length
       ? `<div class="text-xs text-gray-600 p-2">No users in <span class="mono">${esc(db)}</span></div>`
       : `<table class="dt text-xs w-full">
@@ -2360,17 +2477,33 @@ async function usersRoles(targetURI) {
   // Shard-only nodes (configsvr is represented by the cluster-wide card via mongos)
   const shardNodes = rsNodesList().filter(n => n.role === 'shard');
 
-  // Fetch: DB list, session, cluster-wide users/roles via mongos, then per-shard
+  // Fetch: DB list + one connectionStatus per target (mongos and each shard
+  // separately — identities and effective roles can differ per target).
   const mongosUri  = uri; // always use the connected mongos for cluster-wide reads+writes
-  const [dbsRes, connStatus] = await Promise.all([
+  const sessionLabel = topology.type === 'sharded' ? '🌐 mongos' : '📡 connected instance';
+  const [dbsRes, connStatus, shardSessions] = await Promise.all([
     api('/api/db/stats',               {uri: canonicalDataURI()}),
     api('/api/user/connection-status', {uri: mongosUri}),
+    Promise.all(shardNodes.map(async node => {
+      const base     = injectCredsIntoUri(node.uri);
+      const shardUri = base + (base.includes('?')?'&':'?') + 'readPreference=primaryPreferred';
+      const st = await api('/api/user/connection-status', {uri: shardUri});
+      return {label: `🧩 ${node.id}`, status: st};
+    })),
   ]);
+  const sessions = [{label: sessionLabel, status: connStatus}, ...shardSessions];
 
   if (!Array.isArray(dbsRes))
     return setMain(errBox((dbsRes && dbsRes.error) || 'Failed to load databases'));
 
-  const dbOptions = dbsRes.map(d =>
+  // Hide system databases (config, local) unless explicitly requested — user
+  // accounts essentially never live there, and the *AnyDatabase roles can't
+  // read them anyway, so by default they only produce noise/auth errors.
+  const SYS_DBS = new Set(['config','local']);
+  const visibleDbs = urShowSysDbs ? dbsRes : dbsRes.filter(d => !SYS_DBS.has(d.name));
+  if (!urShowSysDbs && SYS_DBS.has(urSelectedDb)) urSelectedDb = '';
+
+  const dbOptions = visibleDbs.map(d =>
     `<option value="${esc(d.name)}" ${d.name===urSelectedDb?'selected':''}>${esc(d.name)}</option>`
   ).join('');
 
@@ -2379,6 +2512,10 @@ async function usersRoles(targetURI) {
       <select id="urDbSelect" onchange="urSelectedDb=this.value;usersRoles()" class="fi text-xs">
         <option value="">Select database…</option>${dbOptions}
       </select></div>
+    <button onclick="urShowSysDbs=!urShowSysDbs;usersRoles()"
+      class="btn-sm ${urShowSysDbs?'btn-active':''}" title="Include config and local in the database list">
+      ${urShowSysDbs?'🗄 Hide system dbs':'🗄 Show system dbs'}
+    </button>
     <button onclick="urShowBuiltin=!urShowBuiltin;usersRoles()"
       class="btn-sm ${urShowBuiltin?'btn-active':''}">
       ${urShowBuiltin?'👁 Hide built-in':'👁 Show built-in'}
@@ -2391,7 +2528,7 @@ async function usersRoles(targetURI) {
   if (!urSelectedDb) {
     setMain(`<div class="space-y-5">
       ${pageHeader('👥','Users & Roles','Select a database',headerActions)}
-      ${renderSessionCard(connStatus)}
+      ${renderSessionCard(sessions)}
       <div class="text-gray-500 text-sm">Select a database to view users and roles.</div>
     </div>`);
     return;
@@ -2441,7 +2578,7 @@ async function usersRoles(targetURI) {
     ${pageHeader('👥','Users & Roles',
       `${[...new Set(shardData.flatMap(s=>s.roles.filter(r=>!r.isBuiltin).map(r=>r.name)))].length + mongosRoles.filter(r=>!r.isBuiltin).length} custom roles · ${[...new Set(shardData.flatMap(s=>s.users.map(u=>u.username)))].length + mongosUsers.length} users`,
       headerActions)}
-    ${renderSessionCard(connStatus)}
+    ${renderSessionCard(sessions)}
     ${renderMongosCard(mongosUsers, mongosRoles, mongosUsersErr, mongosRolesErr, urSelectedDb, urShowBuiltin, mongosUri)}
     ${shardSection}
   </div>`);
@@ -2459,7 +2596,7 @@ function renderUrShardCard(sData, db, showBuiltin) {
   // ── Roles ─────────────────────────────────────────────────────────────────
   let rolesHtml = '';
   if (rolesError) {
-    rolesHtml = `<div class="text-xs text-red-300 p-2">${esc(rolesError)}</div>`;
+    rolesHtml = urErrBlock(rolesError, 'roles', db);
   } else {
     const customRoles = (roles || []).filter(r => !r.isBuiltin);
     const visible     = showBuiltin ? (roles||[]) : customRoles;
@@ -2490,7 +2627,7 @@ function renderUrShardCard(sData, db, showBuiltin) {
   // ── Users ──────────────────────────────────────────────────────────────────
   let usersHtml = '';
   if (usersError) {
-    usersHtml = `<div class="text-xs text-red-300 p-2">${esc(usersError)}</div>`;
+    usersHtml = urErrBlock(usersError, 'users', db);
   } else if (!(users||[]).length) {
     usersHtml = `<div class="text-xs text-gray-600 p-2">No users in <span class="mono">${esc(db)}</span></div>`;
   } else {
@@ -3445,6 +3582,7 @@ async function oplogStats(){
   const rsList = rsNodesList().length > 0 ? rsNodesList() : [{uri}];
   const body = new URLSearchParams({uri});
   rsList.forEach(n => body.append('rs_uri', n.uri));
+  appendShardCreds(body);
   const r = await fetch('/api/db/oplog-stats',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   const results = await r.json();
   if(!Array.isArray(results)) return setMain(errBox((results&&results.error)||'Failed'));
@@ -3457,7 +3595,7 @@ async function oplogStats(){
     (sub?`<div class="text-gray-600 text-xs">${sub}</div>`:'')+`</div>`;
 
   const cards = results.map((rs,idx) => {
-    if(rs.error) return `<div class="card"><div class="card-header">⚠️ ${esc(rs.uri)}</div><div class="p-4 text-red-400 text-sm mono">${esc(rs.error)}</div></div>`;
+    if(rs.error) return `<div class="card"><div class="card-header">⚠️ ${esc(rs.uri)}</div>${cardErrBlock(rs.error, shardIdForUri(rs.uri))}</div>`;
     const usedPct = rs.usedPct || 0;
     const barCol = usedPct < 60 ? '#00ed64' : usedPct < 85 ? '#d29922' : '#f85149';
 
@@ -3538,7 +3676,12 @@ async function oplogStats(){
 function openOplogAnalyze(idx){
   const rs = _oplogResults[idx];
   if(!rs) return;
-  _oaUri = rs.uri;
+  // rs.uri comes back masked from oplog-stats (password shown as "***").
+  // Re-inject real credentials: shard-specific creds when the host matches a
+  // separately-authenticated shard, otherwise the main connection creds.
+  // Without this, config/shard1 (which share the mongos creds) would send the
+  // literal "***" as the password and fail SCRAM auth.
+  _oaUri = injectCredsIntoUri(rs.uri);
   _oaSet = rs.setName || rs.uri;
   document.getElementById('oaSetName').textContent = _oaSet;
   // reset to the warning state
@@ -4709,64 +4852,114 @@ function renderShardCard(s, isSharded) {
   </div>`;
 }
 
-// Extract a flat list of stages from the winning plan tree.
-function _explainStageChain(plan) {
-  const out = [];
-  let s = plan;
-  let guard = 0;
-  while (s && guard++ < 64) {
-    if (s.stage) out.push(s.stage);
-    if (s.inputStage) { s = s.inputStage; continue; }
-    if (Array.isArray(s.inputStages) && s.inputStages.length) { s = s.inputStages[0]; continue; }
-    break;
+// Find the first queryPlanner object anywhere in an explain result. Used by
+// the summary for namespace / indexFilterSet, which live in different places
+// depending on shape: top level (find), inside shards.<name> (sharded find on
+// older versions), or inside shards.<name>.stages[].$cursor / stages[].$cursor
+// (aggregates).
+function _explainFirstQueryPlanner(res) {
+  if (!res || typeof res !== 'object') return {};
+  if (res.queryPlanner) return res.queryPlanner;
+  const scanStages = (stages) => {
+    if (!Array.isArray(stages)) return null;
+    for (const st of stages) {
+      if (st && st.$cursor && st.$cursor.queryPlanner) return st.$cursor.queryPlanner;
+    }
+    return null;
+  };
+  if (res.shards && typeof res.shards === 'object' && !Array.isArray(res.shards)) {
+    for (const v of Object.values(res.shards)) {
+      const sd = Array.isArray(v) ? v[0] : v;
+      if (!sd || typeof sd !== 'object') continue;
+      if (sd.queryPlanner) return sd.queryPlanner;
+      const fromCursor = scanStages(sd.stages);
+      if (fromCursor) return fromCursor;
+    }
   }
-  return out;
+  return scanStages(res.stages) || {};
 }
 
 function buildExplainSummary(res) {
   if (!res || typeof res !== 'object') return '';
 
-  // In a sharded explain the top level contains "shards":{...}; the inner objects
-  // carry queryPlanner / executionStats. We pick the first shard for the summary
-  // and note multi-shard execution.
-  let qp = res.queryPlanner;
-  let es = res.executionStats;
-  let shardCount = 0;
-  let shardName = '';
-  if (!qp && res.shards && typeof res.shards === 'object') {
-    const names = Object.keys(res.shards);
-    shardCount = names.length;
-    if (shardCount > 0) {
-      shardName = names[0];
-      const first = res.shards[shardName];
-      if (Array.isArray(first) && first.length) {
-        qp = first[0].queryPlanner;
-        es = first[0].executionStats;
-      } else if (first && typeof first === 'object') {
-        qp = first.queryPlanner;
-        es = first.executionStats;
-      }
+  // Reuse the visualization extractor: it already understands every explain
+  // shape we render — sharded aggregates (per-shard `stages` arrays with the
+  // query plan tucked inside `$cursor`), sharded finds (winningPlan.shards),
+  // and plain RS / standalone results. Building the summary from the same
+  // structure as the per-shard cards guarantees the two can never disagree
+  // (previously the summary only understood the find shape and only looked
+  // at the FIRST shard, so a sharded aggregate doing a COLLSCAN on every
+  // shard was happily labelled "Looks fine" with no stats).
+  const viz = extractExplainViz(res) || {type: 'unknown', shards: []};
+  const shards = viz.shards || [];
+  const isSharded  = viz.type === 'sharded-aggregate' || viz.type === 'sharded-find';
+  const shardCount = isSharded ? shards.length : 0;
+
+  // ── Plan-stage analysis across ALL shards (not just the first one) ──
+  const goodScans = ['IXSCAN','IDHACK','DISTINCT_SCAN','COUNT_SCAN','CLUSTERED_IXSCAN','EXPRESS_IXSCAN','EXPRESS_CLUSTERED_IXSCAN'];
+  let planStageCount = 0, hasIxScan = false, hasBlockingSort = false;
+  const collScanShards = [];
+  for (const sh of shards) {
+    let shardHasCollScan = false;
+    for (const st of (sh.stages || [])) {
+      if (st.kind === 'pipeline') continue; // $match/$group/… — not plan stages
+      planStageCount++;
+      if (st.name === 'COLLSCAN') shardHasCollScan = true;
+      if (goodScans.includes(st.name)) hasIxScan = true;
+      if (st.name === 'SORT') hasBlockingSort = true;
     }
+    if (shardHasCollScan) collScanShards.push(sh.name || 'local');
   }
-  qp = qp || {};
-  es = es || {};
+  const hasCollScan = collScanShards.length > 0;
 
-  const winningPlan = qp.winningPlan || {};
-  const stages = _explainStageChain(winningPlan);
-  const hasIxScan  = stages.includes('IXSCAN') || stages.includes('IDHACK') || stages.includes('DISTINCT_SCAN');
-  const hasCollScan= stages.includes('COLLSCAN');
-  const hasSortKey = stages.includes('SORT');
+  // ── Execution stats ──
+  // A sharded find rolls totals up into a top-level executionStats document;
+  // a sharded aggregate only reports them per shard (inside $cursor). Prefer
+  // the server's own rollup when present, otherwise sum docs/keys/returned
+  // across shards and take the slowest shard as the effective exec time.
+  const topES = res.executionStats || {};
+  let totalDocs = topES.totalDocsExamined;
+  let totalKeys = topES.totalKeysExamined;
+  let nReturned = topES.nReturned;
+  let execMs    = topES.executionTimeMillis;
+  if (totalDocs === undefined) {
+    for (const sh of shards) if (sh.docsExamined !== undefined) totalDocs = (totalDocs ?? 0) + sh.docsExamined;
+  }
+  if (totalKeys === undefined) {
+    for (const sh of shards) if (sh.keysExamined !== undefined) totalKeys = (totalKeys ?? 0) + sh.keysExamined;
+  }
+  if (nReturned === undefined) {
+    for (const sh of shards) if (sh.nReturned !== undefined) nReturned = (nReturned ?? 0) + sh.nReturned;
+  }
+  if (execMs === undefined) {
+    for (const sh of shards) if (sh.executionMs !== undefined) execMs = Math.max(execMs ?? 0, sh.executionMs);
+  }
 
-  const totalDocs = es.totalDocsExamined;
-  const totalKeys = es.totalKeysExamined;
-  const nReturned = es.nReturned;
-  const execMs    = es.executionTimeMillis;
+  // ── Verdict badge ──
+  // Only claim "Looks fine" when we actually understood the plan. If no plan
+  // stages could be extracted, say so instead of giving a false green light.
+  let badge;
+  if (planStageCount === 0) {
+    badge = '<span class="mb b-SECONDARY">plan not recognized — see breakdown / JSON</span>';
+  } else if (hasCollScan) {
+    const where = shardCount > 1 ? ` on ${collScanShards.length}/${shardCount} shards` : '';
+    badge = `<span class="mb b-DOWN">⚠ COLLSCAN${where} — no index used</span>`;
+  } else if (hasIxScan) {
+    badge = '<span class="mb b-PRIMARY">✓ Index used</span>';
+  } else {
+    badge = '<span class="mb b-PRIMARY">✓ Looks fine</span>';
+  }
+  if (hasBlockingSort) badge += ' <span class="mb b-ARBITER">SORT in memory</span>';
 
-  let badge = '<span class="mb b-PRIMARY">✓ Looks fine</span>';
-  if (hasCollScan) badge = '<span class="mb b-DOWN">⚠ COLLSCAN — no index used</span>';
-  else if (hasIxScan) badge = '<span class="mb b-PRIMARY">✓ Index used</span>';
-  if (hasSortKey && stages[0] === 'SORT') {
-    badge += ' <span class="mb b-ARBITER">SORT in memory</span>';
+  // ── Stage chain ──
+  // Shown from the first shard (plans are usually identical across shards);
+  // if any shard chose a different plan, flag it in the footer note. The
+  // mongos merger pipeline is appended so aggregates show the full picture.
+  const chainOf = (sh) => (sh.stages || []).map(st => st.name).join(' → ');
+  let chain = shards.length ? chainOf(shards[0]) : '';
+  const plansDiffer = shards.length > 1 && shards.some(sh => chainOf(sh) !== chain);
+  if (viz.splitPipeline && Array.isArray(viz.splitPipeline.mergerPart) && viz.splitPipeline.mergerPart.length) {
+    chain += (chain ? ' ⇒ ' : '') + 'merge: ' + viz.splitPipeline.mergerPart.join(' → ');
   }
 
   const ratio = (nReturned && nReturned > 0 && totalDocs !== undefined)
@@ -4780,24 +4973,28 @@ function buildExplainSummary(res) {
     : execMs >= 100  ? 'text-yellow-400'
     : 'text-mg';
 
-  const shardNote = shardCount > 0
-    ? `<div class="text-xs text-gray-500 mt-2">Sharded explain — summary from shard <span class="mono text-gray-300">${esc(shardName)}</span> of ${shardCount}; full per-shard breakdown below.</div>`
+  const qp = _explainFirstQueryPlanner(res);
+
+  const shardNote = isSharded
+    ? `<div class="text-xs text-gray-500 mt-2">Sharded explain across <span class="mono text-gray-300">${shardCount}</span> shards —
+        docs / keys / returned are summed over all shards, exec time is the slowest shard, and the COLLSCAN check covers every shard.${
+        plansDiffer ? ' <span class="text-yellow-400">Shards chose different plans — see the per-shard breakdown below.</span>' : ''}</div>`
     : '';
 
   return `<div class="card">
     <div class="card-header">📊 Summary ${badge}</div>
     <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-      <div><div class="text-gray-500 mb-1">Winning Plan Stages</div>
-        <div class="mono text-gray-200 font-bold break-words">${stages.length?esc(stages.join(' → ')):'—'}</div></div>
-      <div><div class="text-gray-500 mb-1">Exec Time</div>
+      <div><div class="text-gray-500 mb-1">${isSharded?'Plan Stages (per shard)':'Winning Plan Stages'}</div>
+        <div class="mono text-gray-200 font-bold break-words">${chain?esc(chain):'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Exec Time${shardCount>1?' (slowest shard)':''}</div>
         <div class="mono font-bold ${execCls}">${execMs!==undefined?execMs+'ms':'—'}</div></div>
       <div><div class="text-gray-500 mb-1">Returned</div>
         <div class="mono text-gray-200 font-bold">${nReturned??'—'}</div></div>
       <div><div class="text-gray-500 mb-1">Docs / Returned</div>
         <div class="mono font-bold ${ratioCls}">${ratio===null?'—':ratio.toFixed(1)+'×'}</div></div>
-      <div><div class="text-gray-500 mb-1">Docs Examined</div>
+      <div><div class="text-gray-500 mb-1">Docs Examined${shardCount>1?' (all shards)':''}</div>
         <div class="mono text-gray-200 font-bold">${totalDocs??'—'}</div></div>
-      <div><div class="text-gray-500 mb-1">Keys Examined</div>
+      <div><div class="text-gray-500 mb-1">Keys Examined${shardCount>1?' (all shards)':''}</div>
         <div class="mono text-gray-200 font-bold">${totalKeys??'—'}</div></div>
       <div><div class="text-gray-500 mb-1">Namespace</div>
         <div class="mono text-gray-300 break-words">${esc(qp.namespace||_explainCurrentEntry?.ns||'')}</div></div>
@@ -6107,14 +6304,35 @@ async function submitEdit(){
   toast(j.message||'Member updated','success');setTimeout(()=>nav('members'),600);
 }
 
-function openShardAuth(shardId, errorMsg, onComplete){
+// Compose a human explanation of *why* this prompt appeared: which identity
+// already worked (mongos / previously-authenticated shards) and which target
+// rejected the same credentials. The raw driver error stays available in a
+// collapsible block — useful, but no longer the headline.
+function shardAuthMessage(shardId, errorMsg){
+  const who = extractCredentials(uri)?.username || '';
+  const okTargets = [];
+  if (topology.type === 'sharded') okTargets.push('mongos');
+  for (const sid of Object.keys(shardCredentials)) if (sid !== shardId) okTargets.push(sid);
+  const userTxt = who ? `User <span class="mono text-gray-200">${esc(who)}</span>` : 'Your credentials';
+  const okTxt = okTargets.length
+    ? `${userTxt} successfully authenticated on <span class="mono text-gray-200">${okTargets.map(esc).join('</span>, <span class="mono text-gray-200">')}</span>, but the same credentials didn't work on <span class="mono text-gray-200">${esc(shardId)}</span> — please provide credentials for this shard.`
+    : `Authentication failed on <span class="mono text-gray-200">${esc(shardId)}</span> — please provide credentials for this shard.`;
+  const raw = errorMsg
+    ? `<details class="mt-2"><summary class="cursor-pointer text-gray-500">server message</summary>
+       <div class="mono text-gray-500 mt-1 break-all">${esc(errorMsg)}</div></details>`
+    : '';
+  return `<div class="leading-relaxed">${okTxt}</div>
+    <div class="text-gray-500 mt-1">Shards keep their own user catalogs, so a mongos-level user does not automatically exist on every shard.</div>${raw}`;
+}
+
+function openShardAuth(shardId, errorMsg, onComplete, onCancel){
   // Close any other open modals first
   closeEdit();
   closeWC();
-  
-  pendingShardAuth = {shardId, onComplete};
+
+  pendingShardAuth = {shardId, onComplete, onCancel};
   document.getElementById('shardAuthShardId').value = shardId;
-  document.getElementById('shardAuthError').textContent = errorMsg || 'Authentication required for this shard';
+  document.getElementById('shardAuthError').innerHTML = shardAuthMessage(shardId, errorMsg);
   document.getElementById('shardAuthUsername').value = '';
   document.getElementById('shardAuthPassword').value = '';
   
@@ -6140,7 +6358,16 @@ function openShardAuth(shardId, errorMsg, onComplete){
 
 function closeShardAuth(){
   document.getElementById('shardAuthModal').classList.remove('open');
+  const pending = pendingShardAuth;
   pendingShardAuth = null;
+  // Cancelled without authenticating → remember the decline (so pages stop
+  // re-prompting in a loop) and unblock whoever is awaiting this modal.
+  if (pending && !shardCredentials[pending.shardId]) {
+    declinedShardAuth[pending.shardId] = true;
+    if (typeof pending.onCancel === 'function') {
+      try { pending.onCancel(); } catch(_) {}
+    }
+  }
 }
 
 async function submitShardAuth(){
@@ -6203,7 +6430,13 @@ async function submitShardAuth(){
     
     // Credentials work! Store them
     shardCredentials[shardId] = {username, password};
+    delete declinedShardAuth[shardId];
     toast(`Credentials verified and saved for ${shardId}`, 'success');
+
+    // Re-enumerate members now that this shard is reachable — the connect-time
+    // enumeration ran without these credentials, so the shard's members are
+    // missing from every instance selector until this refresh happens.
+    try { await refreshMemberNodes(); } catch(_) {}
     
     // Close modal (this clears pendingShardAuth)
     closeShardAuth();
@@ -6261,26 +6494,26 @@ async function handleAuthErrorsInResults(results) {
   for (const result of results) {
     if (result.error && (result.error.includes('Unauthorized') || result.error.includes('AuthenticationFailed'))) {
       const rawShardId = result.shardId || result.uri;
-      // Extract a simple identifier (hostname:port or shard name)
-      const simpleShardId = extractShardIdFromUri(rawShardId);
-      
+      // Canonicalize to the rs/shard name so credentials are stored under one key
+      const simpleShardId = shardIdForUri(result.uri || rawShardId) || extractShardIdFromUri(rawShardId);
+
+      // Already declined in this session → render the page anyway; the failing
+      // card will show its auth-required state instead of looping the prompt.
+      if (declinedShardAuth[simpleShardId]) continue;
+
       // Store the original URI so we can use it for credential testing
       const originalUri = result.uri || result.shardId;
       shardUriMap[simpleShardId] = originalUri;
       
       debugLog(`[handleAuthErrorsInResults] Auth error for ${simpleShardId}, storing original URI: ${originalUri}`);
       
-      // Return a promise that resolves when user provides auth
+      // Return a promise that resolves when user provides auth (true → retry)
+      // or when they cancel (false → render with per-card errors).
       return new Promise((resolve) => {
         openShardAuth(simpleShardId, result.error, async () => {
           const creds = shardCredentials[simpleShardId];
-          if (creds) {
-            // Credentials have been stored, resolve to retry
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        });
+          resolve(!!creds);
+        }, () => resolve(false));
       });
     }
   }
@@ -6371,7 +6604,54 @@ function statCard(label,value,sub,cls){
     ${sub?`<div class="text-xs text-gray-600 mt-0.5 mono leading-tight">${sub}</div>`:''}
   </div>`;
 }
-function errBox(msg){return `<div class="text-red-400 bg-red-900/20 border border-red-800 rounded p-4 text-sm mono">${esc(String(msg))}</div>`;}
+// Friendly block shown when a page/card can't load because shard credentials
+// were declined or are missing/insufficient. Offers a one-click re-auth.
+function authRequiredBlock(shardId, compact){
+  const btn = `<button onclick="reAuthShard('${esc(shardId)}')" class="btn-sm">🔐 Authenticate to ${esc(shardId)}</button>`;
+  if (compact) return `<div class="p-4 text-sm">
+    <div class="text-gray-400 mb-2">🔒 Not authenticated — can't display this card.</div>${btn}</div>`;
+  return `<div class="card"><div class="p-6 text-center space-y-3">
+    <div class="text-gray-300 font-semibold">🔒 Not authenticated to display this dashboard</div>
+    <div class="text-xs text-gray-500">Credentials for <span class="mono">${esc(shardId)}</span> were not provided or were rejected.</div>
+    <div>${btn}</div></div></div>`;
+}
+// Re-open the auth prompt for a shard; on success, reload the current page.
+function reAuthShard(shardId){
+  delete declinedShardAuth[shardId];
+  // submitShardAuth needs a URI to ping-test the credentials against. If this
+  // prompt was opened from a card button (not a backend failedShard response),
+  // shardUriMap may be empty for this id — backfill it from the topology.
+  if (!shardUriMap[shardId]) {
+    const tn = (topology.nodes||[]).find(n => n.id === shardId);
+    if (tn) shardUriMap[shardId] = tn.uri;
+    else {
+      const hosts = shardHostsFor(shardId);
+      if (hosts.length) shardUriMap[shardId] = 'mongodb://' + hosts.join(',') + '/?replicaSet=' + shardId;
+    }
+  }
+  openShardAuth(shardId, '', async () => { if (currentPage) nav(currentPage); });
+}
+// Per-card error renderer: auth errors get the friendly block + re-auth button,
+// everything else stays a plain message.
+function cardErrBlock(err, shardId){
+  const raw = String(err||'');
+  const m = raw.match(/^AUTH_REQUIRED:(.*)$/);
+  if (m) return authRequiredBlock(m[1]||shardId, true);
+  if (/unauthorized|authentication failed|requires authentication/i.test(raw)) {
+    return `<div class="p-4 text-sm space-y-2">
+      <div class="text-gray-400">🔒 Not authenticated or insufficient roles to display this card.</div>
+      <button onclick="reAuthShard('${esc(shardId)}')" class="btn-sm">🔐 Authenticate to ${esc(shardId)}</button>
+      <details><summary class="cursor-pointer text-xs text-gray-600">server message</summary>
+        <div class="mono text-xs text-gray-600 mt-1 break-all">${esc(raw)}</div></details>
+    </div>`;
+  }
+  return `<div class="p-4 text-red-400 text-sm mono break-all">${esc(raw)}</div>`;
+}
+function errBox(msg){
+  const m = String(msg||'').match(/^AUTH_REQUIRED:(.*)$/);
+  if (m) return authRequiredBlock(m[1]);
+  return `<div class="text-red-400 bg-red-900/20 border border-red-800 rounded p-4 text-sm mono">${esc(String(msg))}</div>`;
+}
 function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 let _tt;
 function toast(msg,type='success'){
