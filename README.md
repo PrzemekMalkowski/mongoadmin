@@ -18,6 +18,12 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
 > Expect breaking changes between versions. Always test in a safe environment before
 > connecting to any live data. Use at your own risk.
 ---
+<p align="center">
+<a href="https://www.youtube.com/watch?v=qJyWdUKkhzQ">
+  <img src="https://img.youtube.com/vi/qJyWdUKkhzQ/maxresdefault.jpg" alt="Watch the demo" width="500" align="center">
+</a><br><em>👆 Click the image to watch the recorded demo!</em></p>
+
+---
 ## 📸 Screenshots
 
 <table>
