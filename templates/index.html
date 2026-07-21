@@ -7,12 +7,12 @@
 <meta name="license-url" content="https://www.gnu.org/licenses/gpl-3.0">
 <meta name="author" content="Przemysław Malkowski">
 <meta name="copyright" content="Copyright (C) 2026 Przemysław Malkowski">
-<meta name="description" content="MongoAdmin — lightweight MongoDB admin panel">
-<title>MongoAdmin</title>
+<meta name="description" content="MClusterAdmin — lightweight admin panel for MongoDB">
+<title>MClusterAdmin for MongoDB</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config={darkMode:'class',theme:{extend:{
-  colors:{mg:{DEFAULT:'#00ed64',dim:'#003d1a',dark:'#00c850'},panel:{DEFAULT:'#161b22',border:'#30363d',inner:'#1c2128',hover:'#21262d'}},
+  colors:{mg:{DEFAULT:'#2bd9a0',dim:'#06382b',dark:'#1fbd88'},panel:{DEFAULT:'#161b22',border:'#30363d',inner:'#1c2128',hover:'#21262d'}},
   fontFamily:{mono:['"JetBrains Mono"','monospace']},
 }}}
 </script>
@@ -21,30 +21,30 @@ tailwind.config={darkMode:'class',theme:{extend:{
 <style>
 :root{color-scheme:dark;}
 body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;}
-.nav-active{background:#003d1a!important;color:#00ed64!important;}
+.nav-active{background:#06382b!important;color:#2bd9a0!important;}
 .jt-key{color:#58a6ff;}.jt-str{color:#3fb950;}.jt-num{color:#e3b341;}
 .jt-bool{color:#f85149;}.jt-null{color:#6e7681;font-style:italic;}.jt-muted{color:#6e7681;}
 .jt-toggle{cursor:pointer;user-select:none;display:flex;align-items:flex-start;gap:2px;}
-.jt-toggle:hover .jt-key{color:#00ed64;}
+.jt-toggle:hover .jt-key{color:#2bd9a0;}
 .jt-children{margin-left:18px;border-left:1px solid #21262d;padding-left:10px;}
 .jt-arrow{display:inline-block;width:14px;font-size:10px;color:#6e7681;transition:transform .15s;flex-shrink:0;margin-top:3px;}
 .jt-arrow.open{transform:rotate(90deg);}
 mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 .mb{font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;display:inline-block;}
-.b-PRIMARY{background:#003d1a;color:#00ed64;}.b-SECONDARY{background:#0c2a5c;color:#58a6ff;}
+.b-PRIMARY{background:#06382b;color:#2bd9a0;}.b-SECONDARY{background:#0c2a5c;color:#58a6ff;}
 .b-ARBITER{background:#3d2e00;color:#d29922;}.b-HIDDEN{background:#21262d;color:#8b949e;}
 .b-DOWN{background:#3d0e0a;color:#f85149;}.b-mongos{background:#1a1a4e;color:#a5b4fc;}
 .b-configsvr{background:#2a1a00;color:#fb923c;}.b-shard{background:#0c2a5c;color:#58a6ff;}
-.b-primary{background:#003d1a;color:#00ed64;}.b-secondary{background:#0c2a5c;color:#58a6ff;}
-.b-ok{background:#003d1a;color:#00ed64;}.b-warn{background:#3d2e00;color:#d29922;}.b-err{background:#3d0e0a;color:#f85149;}
+.b-primary{background:#06382b;color:#2bd9a0;}.b-secondary{background:#0c2a5c;color:#58a6ff;}
+.b-ok{background:#06382b;color:#2bd9a0;}.b-warn{background:#3d2e00;color:#d29922;}.b-err{background:#3d0e0a;color:#f85149;}
 .op-detail{display:none;}.op-detail.open{display:table-row;}
-.op-fast{background:#003d1a;color:#00ed64;}.op-mid{background:#3d2e00;color:#d29922;}.op-slow{background:#3d0e0a;color:#f85149;}
+.op-fast{background:#06382b;color:#2bd9a0;}.op-mid{background:#3d2e00;color:#d29922;}.op-slow{background:#3d0e0a;color:#f85149;}
 .lg-row-open td{background:#111820!important;}
-.lg-row-open .lg-chevron{color:#00ed64!important;}
+.lg-row-open .lg-chevron{color:#2bd9a0!important;}
 .health-track{background:#21262d;border-radius:2px;height:4px;overflow:hidden;}
 .health-fill{height:100%;border-radius:2px;transition:width .5s;}
 .cmd-scroll{max-height:420px;overflow-y:auto;}
-.spinner{border:2px solid #21262d;border-top-color:#00ed64;border-radius:50%;width:20px;height:20px;animation:spin .6s linear infinite;display:inline-block;}
+.spinner{border:2px solid #21262d;border-top-color:#2bd9a0;border-radius:50%;width:20px;height:20px;animation:spin .6s linear infinite;display:inline-block;}
 @keyframes spin{to{transform:rotate(360deg);}}
 @keyframes tm-pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .tm-live-dot{animation:tm-pulse 1.4s ease-in-out infinite;}
@@ -54,7 +54,7 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 .card-header{padding:12px 16px;border-bottom:1px solid #21262d;font-weight:700;font-size:.875rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 /* RS Config visual graph */
 .cfg-spine{position:relative;padding:8px 0 24px;}
-.cfg-spine-line{position:absolute;top:50%;left:24px;right:24px;height:2px;background:linear-gradient(90deg,#00ed64,#58a6ff,#e3b341,#f87171,#a78bfa);border-radius:1px;transform:translateY(-50%);opacity:.4;}
+.cfg-spine-line{position:absolute;top:50%;left:24px;right:24px;height:2px;background:linear-gradient(90deg,#2bd9a0,#58a6ff,#e3b341,#f87171,#a78bfa);border-radius:1px;transform:translateY(-50%);opacity:.4;}
 .cfg-nodes-row{display:flex;gap:16px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px;position:relative;}
 .cfg-node-card{background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:16px;min-width:220px;max-width:280px;flex:1;position:relative;transition:border-color .2s;}
 .cfg-node-card:hover{border-color:#58a6ff66;}
@@ -66,16 +66,16 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
 .dt tr:last-child td{border-bottom:none;}.dt tbody tr:hover td{background:#1c2128;}
 .mono{font-family:"JetBrains Mono",monospace;}
 .btn-sm{border:1px solid #30363d;color:#8b949e;font-size:.75rem;padding:4px 10px;border-radius:5px;background:transparent;cursor:pointer;transition:all .15s;}
-.btn-sm:hover{border-color:#00ed64;color:#00ed64;}
+.btn-sm:hover{border-color:#2bd9a0;color:#2bd9a0;}
 .btn-xs{border:1px solid #30363d;color:#6e7681;font-size:.68rem;padding:3px 8px;border-radius:4px;background:transparent;cursor:pointer;transition:all .15s;}
 .btn-xs:hover{color:#8b949e;}
-.btn-active{border-color:#00ed64!important;color:#00ed64!important;}
+.btn-active{border-color:#2bd9a0!important;color:#2bd9a0!important;}
 .btn-danger{border:1px solid #f85149;color:#f85149;font-size:.75rem;padding:4px 10px;border-radius:5px;background:transparent;cursor:pointer;transition:all .15s;}
 .btn-danger:hover{background:#3d0e0a;}
-.btn-go{border:1px solid #00ed64;color:#00ed64;font-size:.75rem;padding:4px 12px;border-radius:5px;background:rgba(0,237,100,.08);cursor:pointer;transition:all .15s;font-weight:600;}
-.btn-go:hover{background:rgba(0,237,100,.18);}
+.btn-go{border:1px solid #2bd9a0;color:#2bd9a0;font-size:.75rem;padding:4px 12px;border-radius:5px;background:rgba(43,217,160,.08);cursor:pointer;transition:all .15s;font-weight:600;}
+.btn-go:hover{background:rgba(43,217,160,.18);}
 .fi{background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font-family:"JetBrains Mono",monospace;font-size:.8rem;padding:5px 10px;outline:none;}
-.fi:focus{border-color:#00ed64;}select.fi option{background:#161b22;}
+.fi:focus{border-color:#2bd9a0;}select.fi option{background:#161b22;}
 .db-bar-wrap{background:#21262d;border-radius:3px;height:8px;overflow:hidden;flex:1;}
 .db-bar{height:100%;border-radius:3px;transition:width .6s;}
 /* pct bar inline */
@@ -102,7 +102,7 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
   <div class="flex items-center gap-3 mr-2">
     <img src="/static/img/logo.png" alt="" class="h-8 w-auto" onerror="this.style.display='none'">
     <div class="logo">🍃</div>
-    <span class="font-bold text-lg tracking-tight">Mongo<span class="text-mg">Admin</span></span>
+    <span class="font-bold text-lg tracking-tight">MCluster<span class="text-mg">Admin</span></span>
   </div>
   <div class="flex items-center gap-2 flex-1 max-w-xl">
     <input id="uriInput" type="text" placeholder="mongodb://user:pass@host:27017"
@@ -148,7 +148,7 @@ mark.jt-hl{background:#3d2e00;color:#d29922;border-radius:2px;}
     <button onclick="nav('securityStatus')" id="nav-securityStatus" class="nav-btn w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-gray-400 hover:bg-panel-hover transition-all">🔐 Security Status</button>
   </div>
   <div class="mt-auto px-3 py-2 text-[10px] text-gray-700 tracking-wide flex items-center justify-between border-t border-panel-border">
-    <span>🍃 MongoAdmin</span><span class="mono">v{{.Version}}</span>
+    <span>🍃 MClusterAdmin</span><span class="mono">v{{.Version}}</span>
   </div>
 </aside>
 
@@ -625,11 +625,25 @@ function uriInputPaste(event) {
   document.getElementById('uriInput').value = maskUriDisplay(pasted);
 }
 
-// Called on manual input — treat as raw URI (user is typing, not pasting)
+// Called on manual input — keep the hidden raw value in sync with edits.
+// Two cases:
+//  · no bullets in the field → user typed / fully replaced the URI: take it verbatim
+//  · bullets still present   → user edited around a masked password (e.g. changed
+//    the port): rebuild the raw URI from the visible text by substituting the
+//    real password (recovered from the previously stored raw value) back in
+//    place of the bullet run. Without this, edits after paste were silently
+//    ignored and doConnect() kept using the originally pasted string.
 function uriInputChanged(el) {
-  // If the field no longer contains bullets, user edited it — treat as new raw value
-  if (!el.value.includes('•')) {
-    document.getElementById('uriRaw').value = el.value;
+  const rawField = document.getElementById('uriRaw');
+  const v = el.value;
+  if (!v.includes('•')) { rawField.value = v; return; }
+  const m = (rawField.value || '').match(/mongodb(?:\+srv)?:\/\/[^:@]+:([^@]+)@/);
+  if (m) {
+    // $ in a password would be interpreted as a replacement pattern — escape it.
+    rawField.value = v.replace(/•+/, m[1].replace(/\$/g, '$$$$'));
+  } else {
+    // Bullets but no stored password to restore — take the field literally.
+    rawField.value = v;
   }
 }
 
@@ -641,7 +655,8 @@ async function doConnect() {
   setStatus('CONNECTING…','yellow');
   const res=await api('/api/ping',{uri:input});
   if(res.error){setStatus('ERROR','red');return toast(res.error,'error');}
-  uri=input; opTargetURI=uri; ssTargetURI=uri; rsCfgTargetURI=''; usersRolesURI=''; memberNodes=[];
+  resetSessionState();                     // wipe every per-page cache from any previous session
+  uri=input; opTargetURI=uri; ssTargetURI=uri;
   document.getElementById('disconnectBtn').classList.remove('hidden');
   
   // Display masked URI and clear input for security
@@ -690,8 +705,28 @@ async function refreshMemberNodes() {
   }catch(_){/* keep existing memberNodes */}
 }
 
+// Wipe every piece of state tied to a specific cluster session. Called both on
+// disconnect and right before a new connection is established. Without this,
+// pages that cache their own per-instance target URI (WiredTiger, Log Viewer,
+// Slow Queries, …) keep dialing hosts of the previously connected cluster.
+function resetSessionState(){
+  // Per-page cached target URIs (instance-selector memory)
+  opTargetURI=''; ssTargetURI=''; rsCfgTargetURI=''; usersRolesURI='';
+  sqTargetURI=''; lgTargetURI=''; wtTargetURI='';
+  // Per-page db / collection selections
+  sqSelectedDb=''; urSelectedDb=''; csSelectedDb=''; imSelectedDb=''; imSelectedColl='';
+  // Topology + shard-auth caches
+  memberNodes=[]; shardCredentials={}; declinedShardAuth={}; shardUriMap={};
+  // Live traffic monitor: stop polling and drop all sampled data
+  clearInterval(tmIntervalId); tmIntervalId=null; tmRunning=false; tmGen++;
+  tmSeries={}; tmPrev={}; tmSelMetrics=[]; tmSelHosts=[]; tmHidden=new Set(); tmZoom={};
+  // Misc per-session scratch state
+  _lgParsed=[]; _syncState=null;
+}
+
 function doDisconnect(){
-  uri=''; topology={type:'replicaset',nodes:[]}; memberNodes=[]; shardCredentials={}; declinedShardAuth={};
+  uri=''; topology={type:'replicaset',nodes:[]};
+  resetSessionState();
   setStatus('DISCONNECTED','yellow');
   document.getElementById('disconnectBtn').classList.add('hidden');
   document.getElementById('pingMs').classList.add('hidden');
@@ -1149,7 +1184,7 @@ async function rsConfig(targetURI){
   const maxPri  = Math.max(...members.map(m=>m.priority||0), 1);
   const priBars = members.filter(m=>!m.arbiterOnly).sort((a,b)=>b.priority-a.priority).map(m=>{
     const pct = maxPri>0 ? Math.round((m.priority||0)/maxPri*100) : 0;
-    const col = m.priority===maxPri?'#00ed64': m.priority>0?'#58a6ff':'#4b5563';
+    const col = m.priority===maxPri?'#2bd9a0': m.priority>0?'#58a6ff':'#4b5563';
     // Hostname takes the full available width with truncation (k8s pod names are long);
     // the bar gets a fixed compact width since we only care about relative priority.
     return `<div class="flex items-center gap-2">
@@ -1595,7 +1630,7 @@ async function serverStatus(targetURI){
     const grandIn  = byCompressor.reduce((s,c)=>s+c.cIn +c.dIn, 0)  || 1;
     const grandOut = byCompressor.reduce((s,c)=>s+c.cOut+c.dOut, 0) || 1;
 
-    const colors = {snappy:'#00ed64', zstd:'#58a6ff', zlib:'#e3b341', none:'#4b5563', disabled:'#374151'};
+    const colors = {snappy:'#2bd9a0', zstd:'#58a6ff', zlib:'#e3b341', none:'#4b5563', disabled:'#374151'};
     const getCol = name => colors[name.toLowerCase()] || '#a78bfa';
 
     const rows = byCompressor.map(c => {
@@ -1750,7 +1785,7 @@ async function serverStatus(targetURI){
         <tbody>${(Array.isArray(cmds)?cmds:[]).map(c=>{
           const rate=c.Total>0?((1-c.Failed/c.Total)*100).toFixed(1):100;
           const barW=Math.round((c.Total/maxT)*100);
-          const col=rate>99?'#00ed64':rate>95?'#d29922':'#f85149';
+          const col=rate>99?'#2bd9a0':rate>95?'#d29922':'#f85149';
           return `<tr><td class="mono">${esc(c.Name)}</td>
             <td class="mono text-right">${c.Total.toLocaleString()}</td>
             <td class="mono text-right ${c.Failed>0?'text-red-400':''}">${c.Failed.toLocaleString()}</td>
@@ -1793,7 +1828,7 @@ async function dbStats(){
   const totalStorage=stats.reduce((s,d)=>s+d.storageSize,0);
   const totalObjs=stats.reduce((s,d)=>s+d.objects,0);
   const totalIdxSize=stats.reduce((s,d)=>s+d.indexSize,0);
-  const colors=['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+  const colors=['#2bd9a0','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
   const isSharded=topology.type==='sharded';
 
   const rows=stats.map((d,i)=>{
@@ -1937,7 +1972,7 @@ function displayChunkDistribution(data){
     document.getElementById('chunkDistContent').innerHTML=errBox('Invalid response from server');
     return;
   }
-  const colors=['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+  const colors=['#2bd9a0','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
   const fmtB=b=>{if(b>=1e12)return(b/1e12).toFixed(2)+' TB';if(b>=1e9)return(b/1e9).toFixed(2)+' GB';if(b>=1e6)return(b/1e6).toFixed(1)+' MB';if(b>=1e3)return(b/1e3|0)+' KB';return b+' B';};
   const balanceColor=data.balanceScore>=0.8?'text-green-400':data.balanceScore>=0.6?'text-yellow-400':'text-red-400';
   
@@ -3597,7 +3632,7 @@ async function oplogStats(){
   const cards = results.map((rs,idx) => {
     if(rs.error) return `<div class="card"><div class="card-header">⚠️ ${esc(rs.uri)}</div>${cardErrBlock(rs.error, shardIdForUri(rs.uri))}</div>`;
     const usedPct = rs.usedPct || 0;
-    const barCol = usedPct < 60 ? '#00ed64' : usedPct < 85 ? '#d29922' : '#f85149';
+    const barCol = usedPct < 60 ? '#2bd9a0' : usedPct < 85 ? '#d29922' : '#f85149';
 
     const memberRows = (rs.members||[]).map(m => `<tr>
       <td class="mono text-xs">${esc(m.host)}</td>
@@ -3614,7 +3649,7 @@ async function oplogStats(){
           <div class="mono text-gray-300">${oplogFmtUnix(rs.firstTS)}</div>
           <div class="text-gray-600 uppercase tracking-wider">tFirst</div>
         </div>
-        <div class="flex-1 health-track" style="height:7px"><div class="health-fill" style="width:100%;background:linear-gradient(90deg,#1f6feb,#00ed64)"></div></div>
+        <div class="flex-1 health-track" style="height:7px"><div class="health-fill" style="width:100%;background:linear-gradient(90deg,#1f6feb,#2bd9a0)"></div></div>
         <div class="shrink-0" style="min-width:128px">
           <div class="mono text-gray-300">${oplogFmtUnix(rs.lastTS)}</div>
           <div class="text-gray-600 uppercase tracking-wider">tLast</div>
@@ -3717,7 +3752,7 @@ async function runOplogAnalyze(){
 
   const cols = Array.isArray(res.collections) ? res.collections : [];
   const maxMB = cols.reduce((m,c)=>Math.max(m, c.totalMB||0), 0) || 1;
-  const palette = ['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+  const palette = ['#2bd9a0','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
 
   const rows = cols.map((c,i) => {
     const col = palette[i%palette.length];
@@ -3793,7 +3828,7 @@ async function collStats(){
   const colls = Array.isArray(stats) ? stats : [];
   const totalData = colls.reduce((s,c) => s+c.dataSize, 0)||1;
   const fmtB = b => { if(b>1e9) return (b/1e9).toFixed(2)+' GB'; if(b>1e6) return (b/1e6).toFixed(1)+' MB'; if(b>1e3) return (b/1e3|0)+' KB'; return b+' B'; };
-  const colors = ['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
+  const colors = ['#2bd9a0','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c','#60a5fa','#a3e635','#f472b6'];
 
   const rows = colls.map((c,i) => {
     const col = colors[i%colors.length];
@@ -3847,7 +3882,7 @@ async function showChunkDist(db, coll){
   const result = await api('/api/db/chunk-distribution', {uri: canonicalDataURI(), ns});
   if(!result || result.error){ el.innerHTML = errBox(result?.error||'Failed'); return; }
 
-  const colors = ['#00ed64','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c'];
+  const colors = ['#2bd9a0','#58a6ff','#e3b341','#f87171','#a78bfa','#34d399','#fb923c'];
   const balCol  = result.balanceScore>=0.8?'text-green-400':result.balanceScore>=0.6?'text-yellow-400':'text-red-400';
   const fmtB = b => { b=Number(b)||0; if(b>=1e9)return(b/1e9).toFixed(2)+' GB'; if(b>=1e6)return(b/1e6).toFixed(1)+' MB'; if(b>=1e3)return(b/1e3|0)+' KB'; return b+' B'; };
   const fmt  = n => Number(n).toLocaleString();
@@ -4852,114 +4887,64 @@ function renderShardCard(s, isSharded) {
   </div>`;
 }
 
-// Find the first queryPlanner object anywhere in an explain result. Used by
-// the summary for namespace / indexFilterSet, which live in different places
-// depending on shape: top level (find), inside shards.<name> (sharded find on
-// older versions), or inside shards.<name>.stages[].$cursor / stages[].$cursor
-// (aggregates).
-function _explainFirstQueryPlanner(res) {
-  if (!res || typeof res !== 'object') return {};
-  if (res.queryPlanner) return res.queryPlanner;
-  const scanStages = (stages) => {
-    if (!Array.isArray(stages)) return null;
-    for (const st of stages) {
-      if (st && st.$cursor && st.$cursor.queryPlanner) return st.$cursor.queryPlanner;
-    }
-    return null;
-  };
-  if (res.shards && typeof res.shards === 'object' && !Array.isArray(res.shards)) {
-    for (const v of Object.values(res.shards)) {
-      const sd = Array.isArray(v) ? v[0] : v;
-      if (!sd || typeof sd !== 'object') continue;
-      if (sd.queryPlanner) return sd.queryPlanner;
-      const fromCursor = scanStages(sd.stages);
-      if (fromCursor) return fromCursor;
-    }
+// Extract a flat list of stages from the winning plan tree.
+function _explainStageChain(plan) {
+  const out = [];
+  let s = plan;
+  let guard = 0;
+  while (s && guard++ < 64) {
+    if (s.stage) out.push(s.stage);
+    if (s.inputStage) { s = s.inputStage; continue; }
+    if (Array.isArray(s.inputStages) && s.inputStages.length) { s = s.inputStages[0]; continue; }
+    break;
   }
-  return scanStages(res.stages) || {};
+  return out;
 }
 
 function buildExplainSummary(res) {
   if (!res || typeof res !== 'object') return '';
 
-  // Reuse the visualization extractor: it already understands every explain
-  // shape we render — sharded aggregates (per-shard `stages` arrays with the
-  // query plan tucked inside `$cursor`), sharded finds (winningPlan.shards),
-  // and plain RS / standalone results. Building the summary from the same
-  // structure as the per-shard cards guarantees the two can never disagree
-  // (previously the summary only understood the find shape and only looked
-  // at the FIRST shard, so a sharded aggregate doing a COLLSCAN on every
-  // shard was happily labelled "Looks fine" with no stats).
-  const viz = extractExplainViz(res) || {type: 'unknown', shards: []};
-  const shards = viz.shards || [];
-  const isSharded  = viz.type === 'sharded-aggregate' || viz.type === 'sharded-find';
-  const shardCount = isSharded ? shards.length : 0;
-
-  // ── Plan-stage analysis across ALL shards (not just the first one) ──
-  const goodScans = ['IXSCAN','IDHACK','DISTINCT_SCAN','COUNT_SCAN','CLUSTERED_IXSCAN','EXPRESS_IXSCAN','EXPRESS_CLUSTERED_IXSCAN'];
-  let planStageCount = 0, hasIxScan = false, hasBlockingSort = false;
-  const collScanShards = [];
-  for (const sh of shards) {
-    let shardHasCollScan = false;
-    for (const st of (sh.stages || [])) {
-      if (st.kind === 'pipeline') continue; // $match/$group/… — not plan stages
-      planStageCount++;
-      if (st.name === 'COLLSCAN') shardHasCollScan = true;
-      if (goodScans.includes(st.name)) hasIxScan = true;
-      if (st.name === 'SORT') hasBlockingSort = true;
+  // In a sharded explain the top level contains "shards":{...}; the inner objects
+  // carry queryPlanner / executionStats. We pick the first shard for the summary
+  // and note multi-shard execution.
+  let qp = res.queryPlanner;
+  let es = res.executionStats;
+  let shardCount = 0;
+  let shardName = '';
+  if (!qp && res.shards && typeof res.shards === 'object') {
+    const names = Object.keys(res.shards);
+    shardCount = names.length;
+    if (shardCount > 0) {
+      shardName = names[0];
+      const first = res.shards[shardName];
+      if (Array.isArray(first) && first.length) {
+        qp = first[0].queryPlanner;
+        es = first[0].executionStats;
+      } else if (first && typeof first === 'object') {
+        qp = first.queryPlanner;
+        es = first.executionStats;
+      }
     }
-    if (shardHasCollScan) collScanShards.push(sh.name || 'local');
   }
-  const hasCollScan = collScanShards.length > 0;
+  qp = qp || {};
+  es = es || {};
 
-  // ── Execution stats ──
-  // A sharded find rolls totals up into a top-level executionStats document;
-  // a sharded aggregate only reports them per shard (inside $cursor). Prefer
-  // the server's own rollup when present, otherwise sum docs/keys/returned
-  // across shards and take the slowest shard as the effective exec time.
-  const topES = res.executionStats || {};
-  let totalDocs = topES.totalDocsExamined;
-  let totalKeys = topES.totalKeysExamined;
-  let nReturned = topES.nReturned;
-  let execMs    = topES.executionTimeMillis;
-  if (totalDocs === undefined) {
-    for (const sh of shards) if (sh.docsExamined !== undefined) totalDocs = (totalDocs ?? 0) + sh.docsExamined;
-  }
-  if (totalKeys === undefined) {
-    for (const sh of shards) if (sh.keysExamined !== undefined) totalKeys = (totalKeys ?? 0) + sh.keysExamined;
-  }
-  if (nReturned === undefined) {
-    for (const sh of shards) if (sh.nReturned !== undefined) nReturned = (nReturned ?? 0) + sh.nReturned;
-  }
-  if (execMs === undefined) {
-    for (const sh of shards) if (sh.executionMs !== undefined) execMs = Math.max(execMs ?? 0, sh.executionMs);
-  }
+  const winningPlan = qp.winningPlan || {};
+  const stages = _explainStageChain(winningPlan);
+  const hasIxScan  = stages.includes('IXSCAN') || stages.includes('IDHACK') || stages.includes('DISTINCT_SCAN');
+  const hasCollScan= stages.includes('COLLSCAN');
+  const hasSortKey = stages.includes('SORT');
 
-  // ── Verdict badge ──
-  // Only claim "Looks fine" when we actually understood the plan. If no plan
-  // stages could be extracted, say so instead of giving a false green light.
-  let badge;
-  if (planStageCount === 0) {
-    badge = '<span class="mb b-SECONDARY">plan not recognized — see breakdown / JSON</span>';
-  } else if (hasCollScan) {
-    const where = shardCount > 1 ? ` on ${collScanShards.length}/${shardCount} shards` : '';
-    badge = `<span class="mb b-DOWN">⚠ COLLSCAN${where} — no index used</span>`;
-  } else if (hasIxScan) {
-    badge = '<span class="mb b-PRIMARY">✓ Index used</span>';
-  } else {
-    badge = '<span class="mb b-PRIMARY">✓ Looks fine</span>';
-  }
-  if (hasBlockingSort) badge += ' <span class="mb b-ARBITER">SORT in memory</span>';
+  const totalDocs = es.totalDocsExamined;
+  const totalKeys = es.totalKeysExamined;
+  const nReturned = es.nReturned;
+  const execMs    = es.executionTimeMillis;
 
-  // ── Stage chain ──
-  // Shown from the first shard (plans are usually identical across shards);
-  // if any shard chose a different plan, flag it in the footer note. The
-  // mongos merger pipeline is appended so aggregates show the full picture.
-  const chainOf = (sh) => (sh.stages || []).map(st => st.name).join(' → ');
-  let chain = shards.length ? chainOf(shards[0]) : '';
-  const plansDiffer = shards.length > 1 && shards.some(sh => chainOf(sh) !== chain);
-  if (viz.splitPipeline && Array.isArray(viz.splitPipeline.mergerPart) && viz.splitPipeline.mergerPart.length) {
-    chain += (chain ? ' ⇒ ' : '') + 'merge: ' + viz.splitPipeline.mergerPart.join(' → ');
+  let badge = '<span class="mb b-PRIMARY">✓ Looks fine</span>';
+  if (hasCollScan) badge = '<span class="mb b-DOWN">⚠ COLLSCAN — no index used</span>';
+  else if (hasIxScan) badge = '<span class="mb b-PRIMARY">✓ Index used</span>';
+  if (hasSortKey && stages[0] === 'SORT') {
+    badge += ' <span class="mb b-ARBITER">SORT in memory</span>';
   }
 
   const ratio = (nReturned && nReturned > 0 && totalDocs !== undefined)
@@ -4973,28 +4958,24 @@ function buildExplainSummary(res) {
     : execMs >= 100  ? 'text-yellow-400'
     : 'text-mg';
 
-  const qp = _explainFirstQueryPlanner(res);
-
-  const shardNote = isSharded
-    ? `<div class="text-xs text-gray-500 mt-2">Sharded explain across <span class="mono text-gray-300">${shardCount}</span> shards —
-        docs / keys / returned are summed over all shards, exec time is the slowest shard, and the COLLSCAN check covers every shard.${
-        plansDiffer ? ' <span class="text-yellow-400">Shards chose different plans — see the per-shard breakdown below.</span>' : ''}</div>`
+  const shardNote = shardCount > 0
+    ? `<div class="text-xs text-gray-500 mt-2">Sharded explain — summary from shard <span class="mono text-gray-300">${esc(shardName)}</span> of ${shardCount}; full per-shard breakdown below.</div>`
     : '';
 
   return `<div class="card">
     <div class="card-header">📊 Summary ${badge}</div>
     <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-      <div><div class="text-gray-500 mb-1">${isSharded?'Plan Stages (per shard)':'Winning Plan Stages'}</div>
-        <div class="mono text-gray-200 font-bold break-words">${chain?esc(chain):'—'}</div></div>
-      <div><div class="text-gray-500 mb-1">Exec Time${shardCount>1?' (slowest shard)':''}</div>
+      <div><div class="text-gray-500 mb-1">Winning Plan Stages</div>
+        <div class="mono text-gray-200 font-bold break-words">${stages.length?esc(stages.join(' → ')):'—'}</div></div>
+      <div><div class="text-gray-500 mb-1">Exec Time</div>
         <div class="mono font-bold ${execCls}">${execMs!==undefined?execMs+'ms':'—'}</div></div>
       <div><div class="text-gray-500 mb-1">Returned</div>
         <div class="mono text-gray-200 font-bold">${nReturned??'—'}</div></div>
       <div><div class="text-gray-500 mb-1">Docs / Returned</div>
         <div class="mono font-bold ${ratioCls}">${ratio===null?'—':ratio.toFixed(1)+'×'}</div></div>
-      <div><div class="text-gray-500 mb-1">Docs Examined${shardCount>1?' (all shards)':''}</div>
+      <div><div class="text-gray-500 mb-1">Docs Examined</div>
         <div class="mono text-gray-200 font-bold">${totalDocs??'—'}</div></div>
-      <div><div class="text-gray-500 mb-1">Keys Examined${shardCount>1?' (all shards)':''}</div>
+      <div><div class="text-gray-500 mb-1">Keys Examined</div>
         <div class="mono text-gray-200 font-bold">${totalKeys??'—'}</div></div>
       <div><div class="text-gray-500 mb-1">Namespace</div>
         <div class="mono text-gray-300 break-words">${esc(qp.namespace||_explainCurrentEntry?.ns||'')}</div></div>
@@ -5100,7 +5081,7 @@ async function logViewer(targetURI){
     <div class="text-xs text-gray-500 -mt-2 leading-relaxed">
       ℹ️ <span class="mono text-gray-400">getLog</span> returns MongoDB's in-memory log cache — at most the
       <span class="text-gray-300">1024</span> most recent events, not the full history. This is a tail, not a count of
-      everything that exists; lines that have rotated out of memory live only in the on-disk log file, which MongoAdmin
+      everything that exists; lines that have rotated out of memory live only in the on-disk log file, which MClusterAdmin
       (being agentless) doesn't read. The selector above slices these buffered lines client-side.
     </div>
     <div class="grid grid-cols-4 gap-3">
@@ -5172,7 +5153,7 @@ function lgToggle(tr, idx) {
   const pane = document.createElement('div');
   pane.style.cssText = [
     'padding:10px 16px 12px 18px',
-    'border-left:3px solid #00ed64',
+    'border-left:3px solid #2bd9a0',
     'background:#0a0f16',
     'font-family:"JetBrains Mono",monospace',
     'font-size:.75rem',
@@ -5266,7 +5247,7 @@ async function securityStatus(){
         (or a keyFile / <span class="mono">--auth</span>) and create an administrative user.</div>
     </div>`;
   } else if(reachable.length>0){
-    banner=`<div class="rounded-lg p-4" style="background:rgba(0,237,100,.08);border:1px solid rgba(0,237,100,.4)">
+    banner=`<div class="rounded-lg p-4" style="background:rgba(43,217,160,.08);border:1px solid rgba(43,217,160,.4)">
       <div class="font-bold text-mg">✓ Access control enabled</div>
       <div class="text-sm text-gray-300 mt-1">Authentication is required on all ${reachable.length} reachable member(s).</div>
     </div>`;
@@ -5377,7 +5358,7 @@ function tmSections(metrics) {
 }
 
 // Per-host color palette — consistent across all metric charts
-const TM_COLORS = ['#00ed64','#58a6ff','#f85149','#e3b341','#a78bfa','#22d3ee','#fb923c','#a3e635','#f43f5e','#fbbf24'];
+const TM_COLORS = ['#2bd9a0','#58a6ff','#f85149','#e3b341','#a78bfa','#22d3ee','#fb923c','#a3e635','#f43f5e','#fbbf24'];
 
 // ── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -5814,8 +5795,8 @@ function tmClear() {
 }
 
 function tmLiveIndicatorHtml() {
-  return `<span id="tm-ind" class="flex items-center gap-1.5 text-xs font-bold text-mg px-2 py-0.5 rounded-full" style="background:rgba(0,237,100,.08);border:1px solid rgba(0,237,100,.25)">
-    <span class="tm-live-dot" style="width:6px;height:6px;border-radius:50%;background:#00ed64;display:inline-block;flex-shrink:0"></span>LIVE
+  return `<span id="tm-ind" class="flex items-center gap-1.5 text-xs font-bold text-mg px-2 py-0.5 rounded-full" style="background:rgba(43,217,160,.08);border:1px solid rgba(43,217,160,.25)">
+    <span class="tm-live-dot" style="width:6px;height:6px;border-radius:50%;background:#2bd9a0;display:inline-block;flex-shrink:0"></span>LIVE
   </span>`;
 }
 
@@ -5940,7 +5921,7 @@ async function trafficMonitor() {
 
   const metricCbs = TM_METRICS.map(m =>
     `<label class="flex items-center gap-2 cursor-pointer py-0.5 px-2 rounded hover:bg-panel-hover select-none">
-      <input type="checkbox" class="tm-metric-cb" value="${m.key}" style="accent-color:#00ed64"
+      <input type="checkbox" class="tm-metric-cb" value="${m.key}" style="accent-color:#2bd9a0"
         ${['ins','qry','upd','aconn'].includes(m.key) ? 'checked' : ''}>
       <span class="text-xs text-gray-300">${esc(m.label)}</span>
       ${m.unit ? `<span class="text-xs text-gray-600 mono ml-auto">${esc(m.unit)}</span>` : ''}
@@ -5962,7 +5943,7 @@ async function trafficMonitor() {
     `<label class="flex items-center gap-2 cursor-pointer py-1 px-2 rounded hover:bg-panel-hover border border-transparent hover:border-panel-border select-none">
       <input type="checkbox" class="tm-host-cb" value="${esc(h.id)}"
         data-uri="${esc(h.uri)}" data-label="${esc(h.label)}" data-role="${esc(h.role)}"
-        style="accent-color:#00ed64" ${defaultIds.has(h.id) ? 'checked' : ''}>
+        style="accent-color:#2bd9a0" ${defaultIds.has(h.id) ? 'checked' : ''}>
       <span style="width:9px;height:9px;border-radius:50%;background:${TM_COLORS[i%TM_COLORS.length]};flex-shrink:0;display:inline-block"></span>
       <span class="mono text-xs text-gray-300 truncate">${esc(h.label)}</span>
       <span class="mb b-${esc(h.role)} ml-auto shrink-0" style="font-size:.55rem">${esc(h.role)}</span>
@@ -6077,7 +6058,7 @@ async function wiredTiger(targetURI){
   const cacheDirty = Number(cache['tracked dirty bytes in the cache'])||0;
   const cacheUsedPct  = cacheUsed/cacheMax*100;
   const cacheDirtyPct = cacheDirty/cacheMax*100;
-  const cacheCol = cacheUsedPct>90?'#f85149':cacheUsedPct>75?'#d29922':'#00ed64';
+  const cacheCol = cacheUsedPct>90?'#f85149':cacheUsedPct>75?'#d29922':'#2bd9a0';
   const dirtyCol = cacheDirtyPct>20?'#f85149':cacheDirtyPct>10?'#d29922':'#58a6ff';
 
   const evictPagesUser = Number(cache['pages evicted by application threads']||0);
@@ -6115,7 +6096,7 @@ async function wiredTiger(targetURI){
   const comprBar = (label, ratio, uncomp, comp) => {
     if (!ratio) return '';
     const pct = Math.min(100, Math.round(100/Number(ratio)));
-    const col = pct < 40 ? '#00ed64' : pct < 70 ? '#d29922' : '#f85149';
+    const col = pct < 40 ? '#2bd9a0' : pct < 70 ? '#d29922' : '#f85149';
     return `<div class="space-y-1">
       <div class="flex justify-between text-xs">
         <span class="text-gray-500">${label}</span>
@@ -6657,7 +6638,7 @@ let _tt;
 function toast(msg,type='success'){
   const el=document.getElementById('toast');
   el.textContent=(type==='success'?'✓ ':'✗ ')+msg;
-  el.style.cssText=`opacity:1;background:${type==='success'?'#003d1a':'#3d0e0a'};color:${type==='success'?'#00ed64':'#f85149'};border:1px solid ${type==='success'?'#00ed64':'#f85149'};border-radius:8px;padding:10px 14px;`;
+  el.style.cssText=`opacity:1;background:${type==='success'?'#06382b':'#3d0e0a'};color:${type==='success'?'#2bd9a0':'#f85149'};border:1px solid ${type==='success'?'#2bd9a0':'#f85149'};border-radius:8px;padding:10px 14px;`;
   clearTimeout(_tt);_tt=setTimeout(()=>{el.style.opacity='0';},4000);
 }
 </script>

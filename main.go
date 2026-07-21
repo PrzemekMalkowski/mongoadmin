@@ -38,13 +38,12 @@ import (
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-const version = "0.3.6"
+const version = "0.3.7"
 
 var debugMode bool
 var viewOnly  bool
@@ -113,7 +112,7 @@ func getClient(uri string) (*mongo.Client, error) {
 		ApplyURI(uri).
 		SetServerSelectionTimeout(5 * time.Second).
 		SetConnectTimeout(5 * time.Second)
-	c, err := mongo.Connect(ctx, opts)
+	c, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -130,39 +129,39 @@ func getClient(uri string) (*mongo.Client, error) {
 
 func bsonToAny(v interface{}) interface{} {
 	switch x := v.(type) {
-	case primitive.D:
+	case bson.D:
 		m := make(map[string]interface{}, len(x))
 		for _, e := range x {
 			m[e.Key] = bsonToAny(e.Value)
 		}
 		return m
-	case primitive.A:
+	case bson.A:
 		a := make([]interface{}, len(x))
 		for i, e := range x {
 			a[i] = bsonToAny(e)
 		}
 		return a
-	case primitive.ObjectID:
+	case bson.ObjectID:
 		return map[string]string{"$oid": x.Hex()}
-	case primitive.DateTime:
+	case bson.DateTime:
 		return x.Time().UTC().Format(time.RFC3339)
-	case primitive.Timestamp:
+	case bson.Timestamp:
 		return map[string]interface{}{"$timestamp": map[string]uint32{"t": x.T, "i": x.I}}
-	case primitive.Binary:
+	case bson.Binary:
 		return map[string]interface{}{"$binary": fmt.Sprintf("%x", x.Data), "subType": x.Subtype}
-	case primitive.Decimal128:
+	case bson.Decimal128:
 		return x.String()
-	case primitive.Regex:
+	case bson.Regex:
 		return map[string]string{"$regex": x.Pattern, "$options": x.Options}
-	case primitive.JavaScript:
+	case bson.JavaScript:
 		return map[string]string{"$code": string(x)}
-	case primitive.MinKey:
+	case bson.MinKey:
 		return map[string]int{"$minKey": 1}
-	case primitive.MaxKey:
+	case bson.MaxKey:
 		return map[string]int{"$maxKey": 1}
-	case primitive.Undefined, nil:
+	case bson.Undefined, nil:
 		return nil
-	case primitive.Symbol:
+	case bson.Symbol:
 		return string(x)
 	case int32:
 		return x
@@ -421,7 +420,7 @@ func probeMongosReachable(uri string, timeout time.Duration) bool {
 		ApplyURI(uri).
 		SetServerSelectionTimeout(timeout).
 		SetConnectTimeout(timeout)
-	c, err := mongo.Connect(ctx, opts)
+	c, err := mongo.Connect(opts)
 	if err != nil {
 		return false
 	}
@@ -432,7 +431,7 @@ func probeMongosReachable(uri string, timeout time.Duration) bool {
 // discoverMongosIPs runs a $currentOp aggregation on the config-server primary
 // to collect the IP addresses of all currently-connected mongos processes.
 // This is the fallback when config.mongos contains hostnames that are not
-// reachable from the machine running MongoAdmin.
+// reachable from the machine running MClusterAdmin.
 func discoverMongosIPs(cfgURI string) ([]string, error) {
 	c, err := getClient(cfgURI)
 	if err != nil {
@@ -451,7 +450,7 @@ func discoverMongosIPs(cfgURI string) ([]string, error) {
 		},
 		{
 			{Key: "$match", Value: bson.D{
-				{Key: "clientMetadata.driver.name", Value: primitive.Regex{
+				{Key: "clientMetadata.driver.name", Value: bson.Regex{
 					Pattern: `^NetworkInterfaceTL-TaskExecutorPool`,
 					Options: "",
 				}},
@@ -569,7 +568,7 @@ func discoverTopology(mongosURI string) ([]NodeInfo, error) {
 	// 3. Mongos instances — from config.mongos collection
 	//
 	// Some environments advertise hostnames that are not resolvable from the
-	// machine running MongoAdmin (e.g. internal Kubernetes pod names).  We
+	// machine running MClusterAdmin (e.g. internal Kubernetes pod names).  We
 	// therefore probe each hostname with a 1-second hard timeout and, for any
 	// that fail, fall back to IP-address discovery via a $currentOp aggregation
 	// executed on the config-server primary.
@@ -856,7 +855,7 @@ func handleShStatus(w http.ResponseWriter, r *http.Request) {
 						br.Error = e
 					}
 				}
-				// time field is a primitive.DateTime → already converted to RFC3339 string
+				// time field is a bson.DateTime → already converted to RFC3339 string
 				br.Time, _ = m["time"].(string)
 				balRounds = append(balRounds, br)
 			}
@@ -871,7 +870,7 @@ func handleShStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Migration results last 24 h (config.changelog, what=moveChunk.from) ──
-	cutoff := primitive.NewDateTimeFromTime(time.Now().Add(-24 * time.Hour))
+	cutoff := bson.NewDateTimeFromTime(time.Now().Add(-24 * time.Hour))
 	migCounts := map[string]int{}
 	if mrRes, err2 := runCmd(uri, "config", bson.D{
 		{Key: "find", Value: "changelog"},
@@ -2585,7 +2584,7 @@ func handleCheckPresence(w http.ResponseWriter, r *http.Request) {
 //     temp-collection + merge dance is the only way.
 //
 //   Privilege requirement for clone:
-//     The MongoAdmin session must have the built-in `restore` role on the
+//     The MClusterAdmin session must have the built-in `restore` role on the
 //     target's admin database (or `__system`). `userAdminAnyDatabase` alone
 //     is not enough — `_mergeAuthzCollections` is restricted to backup/
 //     restore service accounts because it can overwrite *any* user or role
@@ -3494,25 +3493,23 @@ func handleOplogStats(w http.ResponseWriter, r *http.Request) {
 
 			// Oplog window: time diff between first and last entry.
 			firstCur, err2 := c.Database("local").Collection("oplog.rs").Find(ctx,
-				bson.D{}, &options.FindOptions{
-					Limit: func() *int64 { v := int64(1); return &v }(),
-					Sort:  bson.D{{Key: "$natural", Value: 1}},
-					Projection: bson.D{{Key: "ts", Value: 1}},
-				},
+				bson.D{}, options.Find().
+					SetLimit(1).
+					SetSort(bson.D{{Key: "$natural", Value: 1}}).
+					SetProjection(bson.D{{Key: "ts", Value: 1}}),
 			)
 			lastCur, err3 := c.Database("local").Collection("oplog.rs").Find(ctx,
-				bson.D{}, &options.FindOptions{
-					Limit: func() *int64 { v := int64(1); return &v }(),
-					Sort:  bson.D{{Key: "$natural", Value: -1}},
-					Projection: bson.D{{Key: "ts", Value: 1}},
-				},
+				bson.D{}, options.Find().
+					SetLimit(1).
+					SetSort(bson.D{{Key: "$natural", Value: -1}}).
+					SetProjection(bson.D{{Key: "ts", Value: 1}}),
 			)
 			if err2 == nil && err3 == nil {
 				// Decode the BSON Timestamp directly into a typed struct. Routing
 				// it through bsonToAny() (which boxes the timestamp into a
 				// map[string]uint32) was the reason the window always read 0.
 				type oplogTS struct {
-					Ts primitive.Timestamp `bson:"ts"`
+					Ts bson.Timestamp `bson:"ts"`
 				}
 				var firstDoc, lastDoc oplogTS
 				if firstCur.Next(ctx) { firstCur.Decode(&firstDoc) }
@@ -3592,15 +3589,14 @@ func handleOplogAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	// Newest entry → anchor for the time window (oplog clock, not wall clock).
 	type oplogTS struct {
-		Ts primitive.Timestamp `bson:"ts"`
+		Ts bson.Timestamp `bson:"ts"`
 	}
 	var newest oplogTS
 	{
-		cur, e := coll.Find(ctx, bson.D{}, &options.FindOptions{
-			Limit:      func() *int64 { v := int64(1); return &v }(),
-			Sort:       bson.D{{Key: "$natural", Value: -1}},
-			Projection: bson.D{{Key: "ts", Value: 1}},
-		})
+		cur, e := coll.Find(ctx, bson.D{}, options.Find().
+			SetLimit(1).
+			SetSort(bson.D{{Key: "$natural", Value: -1}}).
+			SetProjection(bson.D{{Key: "ts", Value: 1}}))
 		if e != nil { jsonErr(w, e.Error(), 500); return }
 		if cur.Next(ctx) { cur.Decode(&newest) }
 		cur.Close(ctx)
@@ -3615,7 +3611,7 @@ func handleOplogAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	lowerSecs := int64(newest.Ts.T) - int64(minutes)*60
 	if lowerSecs < 0 { lowerSecs = 0 }
-	lower := primitive.Timestamp{T: uint32(lowerSecs), I: 0}
+	lower := bson.Timestamp{T: uint32(lowerSecs), I: 0}
 
 	pipeline := mongo.Pipeline{
 		bson.D{{Key: "$match", Value: bson.D{
@@ -3858,10 +3854,9 @@ func handleProfilerEntries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cur, err := c.Database(dbName).Collection("system.profile").Find(ctx, filter,
-		&options.FindOptions{
-			Sort:  bson.D{{Key: "millis", Value: -1}},
-			Limit: &limit,
-		},
+		options.Find().
+			SetSort(bson.D{{Key: "millis", Value: -1}}).
+			SetLimit(limit),
 	)
 	if err != nil { jsonErr(w, err.Error(), 500); return }
 	defer cur.Close(ctx)
@@ -4505,7 +4500,7 @@ func generateSelfSignedCert(certFile, keyFile string) error {
 	cert := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization: []string{"MongoAdmin"},
+			Organization: []string{"MClusterAdmin"},
 			CommonName:   "localhost",
 		},
 		NotBefore:             time.Now(),
@@ -4578,13 +4573,13 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version")
 	tcpPort := flag.String("tcp_port", "8787", "TCP port to listen on (default: 8787)")
 	tlsEnabled := flag.Bool("tls", false, "Enable HTTPS with self-signed certificate")
-	certFile := flag.String("cert", "mongoadmin.crt", "Path to TLS certificate file")
-	keyFile := flag.String("key", "mongoadmin.key", "Path to TLS key file")
+	certFile := flag.String("cert", "mca.crt", "Path to TLS certificate file")
+	keyFile := flag.String("key", "mca.key", "Path to TLS key file")
 	viewOnlyFlag := flag.Bool("view-only", false, "Disable all write/mutating operations (read-only mode)")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("MongoAdmin version %s\n", version)
+		fmt.Printf("MClusterAdmin version %s\n", version)
 		os.Exit(0)
 	}
 
@@ -4659,11 +4654,11 @@ func main() {
 		if err := generateSelfSignedCert(*certFile, *keyFile); err != nil {
 			log.Fatalf("Failed to generate/load certificates: %v", err)
 		}
-		fmt.Printf("🍃 MongoAdmin listening on https://localhost%s\n", addr)
+		fmt.Printf("🍃 MClusterAdmin listening on https://localhost%s\n", addr)
 		fmt.Printf("⚠️  Using self-signed certificate (ignore browser warnings)\n")
 		log.Fatal(http.ListenAndServeTLS(addr, *certFile, *keyFile, mux))
 	} else {
-		fmt.Printf("🍃 MongoAdmin listening on http://localhost%s\n", addr)
+		fmt.Printf("🍃 MClusterAdmin listening on http://localhost%s\n", addr)
 		log.Fatal(http.ListenAndServe(addr, mux))
 	}
 }

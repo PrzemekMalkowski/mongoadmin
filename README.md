@@ -1,28 +1,22 @@
-# 🍃 MongoAdmin
+# 🍃 MClusterAdmin — admin panel for MongoDB
 
 > A lightweight, single-binary web admin panel for MongoDB DBAs — replica sets and sharded clusters auto-discovery included.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)](https://go.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-4.2%2B-00ED64?logo=mongodb)](https://www.mongodb.com/)
 
-MongoAdmin is a zero-dependency, self-hosted MongoDB administration interface written in Go.  
+MClusterAdmin is a zero-dependency, self-hosted MongoDB administration interface written in Go.  
 Connect to any standalone instance, replica set, or sharded cluster with a single URI and get an instant overview of your cluster health, operations, data distribution, users, and more — all through a clean dark-mode UI.  
 The tool is very lightweight in terms of resource requirements and size (binary around 16MB), so should be ideal as a **sidecar container** to your MongoDB cluster deployment.  
-No need for any agents, or SSH access, MongoAdmin connects directly to all MongoDB instances it is able to find through the router (mongos) or replica set member connection string.  
+No need for any agents, or SSH access, MClusterAdmin connects directly to all MongoDB instances it is able to find through the router (mongos) or replica set member connection string.  
 It is meant to fill the gap in DBA-oriented GUI tools, focused on replication, sharding and general quick cluster overview and simple administrative operations.   
-MongoAdmin is **not** intended for viewing or editing data collections, there are plenty of other tools available for that. It is also not a long term monitoring or alerting solution. For that, I strongly recommend [Percona Monitoring and Management (PMM)](https://docs.percona.com/percona-monitoring-and-management/3/) for the best monitoring experience.
+MClusterAdmin is **not** intended for viewing or editing data collections, there are plenty of other tools available for that. It is also not a long term monitoring or alerting solution. For that, I strongly recommend [Percona Monitoring and Management (PMM)](https://docs.percona.com/percona-monitoring-and-management/3/) for the best monitoring experience.
 
 > [!WARNING]
-> **MongoAdmin is currently in beta.** It is not recommended for production use.
+> **MClusterAdmin is currently in beta.** It is not recommended for production use.
 > Expect breaking changes between versions. Always test in a safe environment before
 > connecting to any live data. Use at your own risk.
----
-<p align="center">
-<a href="https://www.youtube.com/watch?v=qJyWdUKkhzQ">
-  <img src="https://img.youtube.com/vi/qJyWdUKkhzQ/maxresdefault.jpg" alt="Watch the demo" width="500" align="center">
-</a><br><em>👆 Click the image to watch the recorded demo!</em></p>
-
 ---
 ## 📸 Screenshots
 
@@ -60,12 +54,10 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
   <tr>
     <td><a href="docs/screenshots/users_roles.png"><img src="docs/screenshots/users_roles.png" alt="Users & Roles" width="280"/></a></td>
     <td><a href="docs/screenshots/query_explain.png"><img src="docs/screenshots/query_explain.png" alt="Query Explain" width="280"/></a></td>
-    <td><a href="docs/screenshots/oplog_stats.png"><img src="docs/screenshots/oplog_stats.png" alt="Query Explain" width="280"/></a></td>
   </tr>
   <tr>
     <td align="center"><em>Users &amp; Roles</em></td>
     <td align="center"><em>Query Explain</em></td>
-    <td align="center"><em>Oplog Statistics</em></td>
   </tr>
 </table>
 
@@ -124,37 +116,37 @@ MongoAdmin is **not** intended for viewing or editing data collections, there ar
 
 ### Prerequisites
 
-- **Go 1.21+** (for building from source)
+- **Go 1.22+** (for building from source)
 - A running **MongoDB 4.2+** instance (standalone, replica set, or sharded cluster)
 
 ### Build
 
 ```bash
-git clone https://github.com/PrzemekMalkowski/mongoadmin.git
-cd mongoadmin
-go build -o mongoadmin .
+git clone https://github.com/PrzemekMalkowski/mclusteradmin.git
+cd mclusteradmin
+go build -o mca .
 ```
 
 ### Run
 
 ```bash
 # Plain HTTP on port 8787 (default)
-./mongoadmin
+./mca
 
 # Custom port
-./mongoadmin --tcp_port 9090
+./mca --tcp_port 9090
 
 # HTTPS with an auto-generated self-signed certificate
-./mongoadmin --tls
+./mca --tls
 
 # HTTPS with your own certificate
-./mongoadmin --tls --cert /path/to/cert.pem --key /path/to/key.pem
+./mca --tls --cert /path/to/cert.pem --key /path/to/key.pem
 
 # Enable verbose server-side debug logging
-./mongoadmin --debug
+./mca --debug
 
 # Read-only mode — all write/mutating operations are disabled in the UI and blocked at the API level
-./mongoadmin --view-only
+./mca --view-only
 ```
 
 Open your browser at `http://localhost:8787` (or `https://localhost:8787` if TLS is enabled).
@@ -165,8 +157,8 @@ Open your browser at `http://localhost:8787` (or `https://localhost:8787` if TLS
 |------|---------|-------------|
 | `--tcp_port` | `8787` | TCP port to listen on |
 | `--tls` | `false` | Enable HTTPS |
-| `--cert` | `mongoadmin.crt` | Path to TLS certificate file |
-| `--key` | `mongoadmin.key` | Path to TLS private key file |
+| `--cert` | `mca.crt` | Path to TLS certificate file |
+| `--key` | `mca.key` | Path to TLS private key file |
 | `--debug` | `false` | Enable server-side debug logging |
 | `--view-only` | `false` | Disable all write/mutating operations — destructive UI controls are hidden and the API returns `403` for any write attempt |
 | `--version` | — | Print version and exit |
@@ -185,18 +177,18 @@ mongodb+srv://username:password@cluster.example.mongodb.net/
 ```
 
 - Credentials are masked in the UI after connecting.
-- For **sharded clusters**, connect to a **mongos** router — MongoAdmin will automatically discover all shards and the config server.
-- For **replica sets**, connect to any member; MongoAdmin will build the full topology.
-- If individual shards require different credentials from the mongos, MongoAdmin will prompt you per shard.
+- For **sharded clusters**, connect to a **mongos** router — MClusterAdmin will automatically discover all shards and the config server.
+- For **replica sets**, connect to any member; MClusterAdmin will build the full topology.
+- If individual shards require different credentials from the mongos, MClusterAdmin will prompt you per shard.
 
 ---
 
 ## 🔑 Required MongoDB Privileges
 
-MongoAdmin authenticates as a regular MongoDB user — there is no separate user database inside the tool. Every dashboard runs admin commands on your behalf, so the connected user must hold the privileges those commands require. The tables below break the privilege requirements down per dashboard so you can grant the minimum set that fits your use case.
+MClusterAdmin authenticates as a regular MongoDB user — there is no separate user database inside the tool. Every dashboard runs admin commands on your behalf, so the connected user must hold the privileges those commands require. The tables below break the privilege requirements down per dashboard so you can grant the minimum set that fits your use case.
 
 > [!NOTE]
-> In a **sharded cluster**, create the user on a `mongos` against the `admin` database — MongoDB writes it to the config servers and it is then valid cluster-wide. Create users only on each shard's primary when you need shard-local accounts (the per-shard authentication prompt in MongoAdmin uses these).
+> In a **sharded cluster**, create the user on a `mongos` against the `admin` database — MongoDB writes it to the config servers and it is then valid cluster-wide. Create users only on each shard's primary when you need shard-local accounts (the per-shard authentication prompt in MClusterAdmin uses these).
 
 ### Per-dashboard privilege map
 
@@ -219,11 +211,11 @@ MongoAdmin authenticates as a regular MongoDB user — there is no separate user
 | Log Viewer | `clusterMonitor` | `getLog` |
 | Oplog Stats | `clusterMonitor` + `read` on `local` | `replSetGetStatus`, `serverStatus`, `collStats` and find on `local.oplog.rs` |
 | Users & Roles — **view / manage** | `userAdminAnyDatabase` | `usersInfo`, `rolesInfo`, `createUser`, `dropUser`, `updateUser`, `createRole`, `updateRole`, `dropRole` |
-| Users & Roles — **cross-shard sync** | `userAdminAnyDatabase` on each target shard | `usersInfo` / `rolesInfo` (read source), `createUser` / `createRole` (write target). Per-shard credentials apply: when individual shards use different credentials from mongos, MongoAdmin's per-shard auth prompt collects them |
+| Users & Roles — **cross-shard sync** | `userAdminAnyDatabase` on each target shard | `usersInfo` / `rolesInfo` (read source), `createUser` / `createRole` (write target). Per-shard credentials apply: when individual shards use different credentials from mongos, MClusterAdmin's per-shard auth prompt collects them |
 
 ### Recommended `madmin` user — full functionality
 
-The set below covers **every** MongoAdmin dashboard except explain of `update` / `delete` ops on user collections (which would also require write privileges — see the note below). It deliberately avoids `root` and `clusterAdmin` so the user cannot drop databases.
+The set below covers **every** MClusterAdmin dashboard except explain of `update` / `delete` ops on user collections (which would also require write privileges — see the note below). It deliberately avoids `root` and `clusterAdmin` so the user cannot drop databases.
 
 Run this on a `mongos` (for sharded) or any RS member's primary (for replica sets):
 
@@ -270,7 +262,7 @@ db.createUser({
 })
 ```
 
-This account can use every monitoring-only dashboard (RS Status, Cluster Diagram, Sharding Status, Server Status, Host Info, Live Traffic, Current Ops, Slow Queries with EXPLAIN, Log Viewer, Oplog Stats, Database / Collection Stats, Index list). All write-back features (balancer toggle, RS reconfig, flow control, kill op, drop index, set profile level, user / role management) will be refused both by MongoAdmin (when launched with `--view-only`) and by MongoDB itself (insufficient privileges).
+This account can use every monitoring-only dashboard (RS Status, Cluster Diagram, Sharding Status, Server Status, Host Info, Live Traffic, Current Ops, Slow Queries with EXPLAIN, Log Viewer, Oplog Stats, Database / Collection Stats, Index list). All write-back features (balancer toggle, RS reconfig, flow control, kill op, drop index, set profile level, user / role management) will be refused both by MClusterAdmin (when launched with `--view-only`) and by MongoDB itself (insufficient privileges).
 
 ### Quick alternative — `root`
 
@@ -287,7 +279,7 @@ This is the simplest option but the least defensible from a least-privilege stan
 ## 🗂 Project Structure
 
 ```
-mongoadmin/
+mclusteradmin/
 ├── main.go              # Go backend — HTTP server and all API handlers
 └── templates/
     └── index.html       # Single-page frontend (Tailwind CSS, vanilla JS)
@@ -392,11 +384,11 @@ All endpoints accept `POST` requests with `application/x-www-form-urlencoded` bo
 
 ## 🔒 Security Considerations
 
-MongoAdmin is designed as an **internal / ops tool**. Before exposing it:
+MClusterAdmin is designed as an **internal / ops tool**. Before exposing it:
 
-- **Do not expose MongoAdmin on a public interface** without authentication in front of it (e.g. reverse proxy with HTTP Basic Auth, VPN, or SSH tunnel).
+- **Do not expose MClusterAdmin on a public interface** without authentication in front of it (e.g. reverse proxy with HTTP Basic Auth, VPN, or SSH tunnel).
 - Enable TLS (`--tls`) whenever the tool is accessed over an untrusted network.
-- MongoAdmin does not implement its own login system — it relies on MongoDB's built-in access control via the connection URI.
+- MClusterAdmin does not implement its own login system — it relies on MongoDB's built-in access control via the connection URI.
 - Use `--view-only` when granting access to operators or teams who need visibility into the cluster but must not be able to alter it. In this mode all destructive UI controls are hidden and every mutating API endpoint returns `403 Forbidden` regardless of the MongoDB user's own privileges.
 - All destructive operations (kill op, drop index, delete user/role, stop balancer) require explicit user action in the UI.
 
@@ -416,7 +408,7 @@ go run . --debug --tcp_port 8787
 
 ## 📜 License
 
-MongoAdmin is free software: you can redistribute it and/or modify it under the terms of the  
+MClusterAdmin is free software: you can redistribute it and/or modify it under the terms of the  
 **GNU General Public License version 3** as published by the Free Software Foundation.
 
 This program is distributed in the hope that it will be useful, but **WITHOUT ANY WARRANTY**;  
